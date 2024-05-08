@@ -7,7 +7,7 @@ There’s also some extra information like expiring credentials, permissions gra
 ## Features
 
 * Power BI report with information of App Registrations and Service Principals.
-* Email notifications of expiring credentials to application owners (see [email notifications](https://github.com/jesusfer/apps-report/wiki/Email-Notifications)).
+* Email notifications of expiring credentials to application owners (see [email notifications](https://github.com/jesusfer/entraid-apps-report/wiki/Email-Notifications)).
 * EXO Application Access Policies related to the tenant's service principals.
 
 ### Planned features
@@ -25,7 +25,7 @@ Storage Account (tables) | Used to store the information about apps, service pri
 
 A diagram to show the architecture:
 
-![solution-diagram](https://github.com/jesusfer/apps-report/wiki/img/solution-diagram.png)
+![solution-diagram](https://github.com/jesusfer/entraid-apps-report/wiki/img/solution-diagram.png)
 
 ## Setup
 
@@ -36,11 +36,11 @@ The deployment consists of several steps:
 3. Schedule the runbooks.
 4. Connect and publish the report.
 
-Head over to the [install docs](https://github.com/jesusfer/apps-report/wiki/Installation-instructions) to get started.
+Head over to the [install docs](https://github.com/jesusfer/entraid-apps-report/wiki/Installation-instructions) to get started.
 
 ## More information
 
 More information available here:
 
-* [Detailed data model](https://github.com/jesusfer/apps-report/wiki/Data-model)
-* [Configuration variables](https://github.com/jesusfer/apps-report/wiki/Installation-instructions#variables)
+* [Detailed data model](https://github.com/jesusfer/entraid-apps-report/wiki/Data-model)
+* [Configuration variables](https://github.com/jesusfer/entraid-apps-report/wiki/Installation-instructions#variables)
