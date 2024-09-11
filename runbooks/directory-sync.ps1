@@ -16,12 +16,17 @@ Import-Module Az.Resources
 Import-Module Az.Storage
 Import-Module Az.Accounts
 Import-Module AzTable
+Update-AzConfig -DisplaySecretsWarning $false | Out-Null
+# Ensures you do not inherit an AzContext in your runbook
+Disable-AzContextAutosave -Scope Process | Out-Null
 $VerbosePreference = $PreviousVerbosePreference
 
 # $VerbosePreference = 'Continue'
 # $ErrorActionPreference = 'Stop'
 
 $ownerRE = '(owner|propietario)[=:]([\w@.-_]+)'
+
+
 
 # Main orchestration function
 function Start-Work {
@@ -561,7 +566,5 @@ function Invoke-Graph {
     return $response
 }
 
-# Ensures you do not inherit an AzContext in your runbook
-Disable-AzContextAutosave -Scope Process | Out-Null
 Start-Work
 Disconnect-AzAccount | Out-Null

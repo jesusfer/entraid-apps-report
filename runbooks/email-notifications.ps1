@@ -31,6 +31,9 @@ Import-Module Az.Resources
 Import-Module Az.Storage
 Import-Module Az.Accounts
 Import-Module AzTable
+Update-AzConfig -DisplaySecretsWarning $false | Out-Null
+# Ensures you do not inherit an AzContext in your runbook
+Disable-AzContextAutosave -Scope Process | Out-Null
 $VerbosePreference = $PreviousVerbosePreference
 
 function Get-DateString {
@@ -450,7 +453,5 @@ function Invoke-PaginatedGraphList {
     return $fullReponse
 }
 
-# Ensures you do not inherit an AzContext in your runbook
-Disable-AzContextAutosave -Scope Process | Out-Null
 Start-Work
 Disconnect-AzAccount | Out-Null
