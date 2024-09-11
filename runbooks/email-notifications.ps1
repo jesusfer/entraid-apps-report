@@ -1,7 +1,7 @@
 param
 (
-    [bool]$DryRun = $true,
 
+    [bool]$Send_Emails = $false,
     # UA or SA, User-Assigned or System Assigned
     [string]$ManagedIdentityMethod = "SA"
 )
@@ -18,8 +18,11 @@ $NotificationEmailSubject = Get-AutomationVariable -Name 'NotificationEmailSubje
 [bool]$NotificationEmailUseDefault = Get-AutomationVariable -Name 'NotificationEmailUseDefault'
 $NotificationEmailDefaultAddress = Get-AutomationVariable -Name 'NotificationEmailDefaultAddress'
 
+if (-not $Send_Emails) {
+    Write-Warning '*** DRY RUN ***'
+}
 if ($NotificationEmailUseDefault) {
-    Write-Warning "The account $($NotificationEmailDefaultAddress) will receive notification of apps without owners"
+    Write-Warning "The account $($NotificationEmailDefaultAddress) will receive notifications of apps without owners"
 }
 
 $PreviousVerbosePreference = $VerbosePreference
@@ -101,7 +104,6 @@ function Send-ExpiringCredentialNotification {
         $remaining = ((Get-Date $ExpriringObject.EndDateTime) - (Get-Date)).TotalDays
         Write-Verbose "Credential=$($ExpriringObject.Name) (KeyId=$($ExpriringObject.KeyId)) App=$($sp.DisplayName) (AppId=$($appId)) Expires: $(Get-DateString $ExpriringObject.EndDateTime) ($($remaining.ToString('N1')) days)"
         $emailImportance = 'normal'
-        # Write-Verbose "$($remaining.ToString('N1')) days until expiration"
         # Check if notified
         $alreadyNotified = $SentNotifications | Where-Object { $_.PartitionKey -eq $appId -and $_.RowKey -eq $ExpriringObject.KeyId }
         if (($alreadyNotified | Measure-Object).Count -eq 1) {
@@ -114,7 +116,7 @@ function Send-ExpiringCredentialNotification {
                 Write-Verbose 'Sending second notification'
                 $emailImportance = 'high'
             } else {
-                Write-Verbose 'Not sending another notification just yet'
+                Write-Verbose 'Not sending the second notification just yet'
                 return
             }
         }
@@ -144,21 +146,21 @@ function Send-ExpiringCredentialNotification {
             New-Email -Subject $NotificationEmailSubject -Body $body -Recipient $_ -Importance $emailImportance
         }
         # Update notification sent
-        if ($DryRun) {
+        if (-not $Send_Emails) {
             Write-Warning "DRY-RUN: Would upsert a row in the notifications table ($appId)"
-        } else {
-            if ($null -eq $alreadyNotified) {
-                # Write-Verbose 'Storing new notification'
-                $properties = @{
-                    Notification30 = (Get-Date).ToString('o')
-                    Notification15 = ''
-                }
-                Add-AzTableRow -Table $NotificationsTable -PartitionKey $appId -RowKey $ExpriringObject.KeyId -Property $properties | Out-Null
-            } else {
-                # Write-Verbose 'Updating notification'
-                $alreadyNotified.Notification15 = (Get-Date).ToString('o')
-                $alreadyNotified | Update-AzTableRow -Table $NotificationsTable | Out-Null
+            return
+        }
+        if ($null -eq $alreadyNotified) {
+            Write-Verbose 'Storing new notification'
+            $properties = @{
+                Notification30 = (Get-Date).ToString('o')
+                Notification15 = ''
             }
+            Add-AzTableRow -Table $NotificationsTable -PartitionKey $appId -RowKey $ExpriringObject.KeyId -Property $properties | Out-Null
+        } else {
+            Write-Verbose 'Updating notification'
+            $alreadyNotified.Notification15 = (Get-Date).ToString('o')
+            $alreadyNotified | Update-AzTableRow -Table $NotificationsTable | Out-Null
         }
     }
 }
@@ -293,11 +295,11 @@ function New-Email {
     $emailJson = $email | ConvertTo-Json -Depth 10
     # Write-Verbose $emailJson
     $path = "/users/$($NotificationEmailSendAs)/sendMail"
-    if ($DryRun) {
-        Write-Warning "DRY-RUN: Would send email to $Recipient"
-    } else {
+    if ($Send_Emails) {
         Invoke-Graph -Path $path -Method 'Post' -Body $emailJson | Out-Null
         Write-Verbose 'Email sent successfully'
+    } else {
+        Write-Warning "DRY-RUN: Would send email to $Recipient"
     }
 }
 
@@ -450,8 +452,5 @@ function Invoke-PaginatedGraphList {
 
 # Ensures you do not inherit an AzContext in your runbook
 Disable-AzContextAutosave -Scope Process | Out-Null
-if ($DryRun) {
-    Write-Verbose '* DRY RUN *'
-}
 Start-Work
 Disconnect-AzAccount | Out-Null
