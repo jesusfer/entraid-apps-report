@@ -1,7 +1,8 @@
 param
 (
-
     [bool]$Send_Emails = $false,
+# TODO: probar envío de correo con dry-run
+# TODO: Renombrar a ActuallySendEmail
     # UA or SA, User-Assigned or System Assigned
     [string]$ManagedIdentityMethod = "SA"
 )
@@ -105,7 +106,9 @@ function Send-ExpiringCredentialNotification {
         }
         
         $remaining = ((Get-Date $ExpriringObject.EndDateTime) - (Get-Date)).TotalDays
-        Write-Verbose "Credential=$($ExpriringObject.Name) (KeyId=$($ExpriringObject.KeyId)) App=$($sp.DisplayName) (AppId=$($appId)) Expires: $(Get-DateString $ExpriringObject.EndDateTime) ($($remaining.ToString('N1')) days)"
+        Write-Verbose "Credential=$($ExpriringObject.Name) (KeyId=$($ExpriringObject.KeyId)) `
+        App=$($sp.DisplayName) (AppId=$($appId)) `
+        Expires: $(Get-DateString $ExpriringObject.EndDateTime) ($($remaining.ToString('N1')) days)"
         $emailImportance = 'normal'
         # Check if notified
         $alreadyNotified = $SentNotifications | Where-Object { $_.PartitionKey -eq $appId -and $_.RowKey -eq $ExpriringObject.KeyId }

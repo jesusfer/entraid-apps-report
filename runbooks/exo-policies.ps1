@@ -12,6 +12,7 @@ Import-Module Az.Storage
 Import-Module Az.Accounts
 Import-Module AzTable
 Import-Module ExchangeOnlineManagement
+Update-AzConfig -DisplaySecretsWarning $false | Out-Null
 $VerbosePreference = $PreviousVerbosePreference
 
 $Subscription = Get-AutomationVariable -Name 'Subscription'
