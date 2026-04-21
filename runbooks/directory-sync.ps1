@@ -26,8 +26,6 @@ $VerbosePreference = $PreviousVerbosePreference
 
 $ownerRE = '(owner|propietario)[=:]([\w@.-_]+)'
 
-
-
 # Main orchestration function
 function Start-Work {
     param()
@@ -174,8 +172,8 @@ function Set-ServicePrincipalsInStorage {
                 Type             = IfNull $key.type 'Unknown'
                 Thumbprint       = IfNull $key.customKeyIdentifier 'Unknown'
             }
-            Write-Verbose ($servicePrincipal|ConvertTo-Json)
-            Write-Verbose ($properties|ConvertTo-Json)
+            Write-Verbose ($servicePrincipal | ConvertTo-Json -Depth 5)
+            Write-Verbose ($properties | ConvertTo-Json -Depth 5)
             $params = @{
                 Table        = $table
                 PartitionKey = $pk
@@ -222,8 +220,8 @@ function Set-ServicePrincipalsInStorage {
                 PrincipalDisplayName = $assignment.principalDisplayName
                 PrincipalId          = $assignment.principalId
             }
-            Write-Verbose ($servicePrincipal|ConvertTo-Json)
-            Write-Verbose ($properties|ConvertTo-Json)
+            Write-Verbose ($servicePrincipal | ConvertTo-Json -Depth 5)
+            Write-Verbose ($properties | ConvertTo-Json -Depth 5)
             $params = @{
                 Table        = $table
                 PartitionKey = $pk
@@ -486,11 +484,10 @@ function Get-GraphToken {
         Write-Verbose "Getting new access token"
         $creds = Get-AutomationPSCredential -Name 'AppReg'
         $context = (Connect-AzAccount -Tenant $TenantId -Credential $creds -ServicePrincipal -Environment AzureCloud).Context
-        $token = Get-AzAccessToken -ResourceUrl 'https://graph.microsoft.com' -DefaultProfile $context
-        Write-Verbose "Returned token: $($token.Token)"
-        $env:GraphAccessToken = $token.Token
+        $token = Get-AzAccessToken -ResourceUrl 'https://graph.microsoft.com' -DefaultProfile $context -AsSecureString
+        $plainToken = ConvertFrom-SecureString -SecureString $token.Token -AsPlainText
+        $env:GraphAccessToken = $plainToken
     }
-    Write-Verbose $env:GraphAccessToken
     return $env:GraphAccessToken
 }
 
