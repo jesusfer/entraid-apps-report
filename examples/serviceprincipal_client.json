@@ -1,0 +1,51 @@
+{
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals(accountEnabled,appId,appRoleAssignmentRequired,appRoles,displayName,id,keyCredentials,notes,oauth2PermissionScopes,passwordCredentials,preferredSingleSignOnMode,replyUrls,resourceSpecificApplicationPermissions,samlSingleSignOnSettings,servicePrincipalNames,servicePrincipalType,signInAudience,appRoleAssignedTo())/$entity",
+    "accountEnabled": true,
+    "appId": "aa29efed-58e7-4651-a15f-7a6d68557a89",
+    "appRoleAssignmentRequired": false,
+    "displayName": "App roles client",
+    "id": "77ad36cd-bda9-45ce-bb3d-447de5695952",
+    "notes": null,
+    "preferredSingleSignOnMode": null,
+    "replyUrls": [
+        "https://jesusferdev.sharepoint.com/sites/msal/html/redirect.aspx",
+        "https://jesusferdev.sharepoint.com",
+        "https://app.insomnia.rest/oauth/redirect"
+    ],
+    "servicePrincipalNames": [
+        "aa29efed-58e7-4651-a15f-7a6d68557a89"
+    ],
+    "servicePrincipalType": "Application",
+    "signInAudience": "AzureADMyOrg",
+    "samlSingleSignOnSettings": null,
+    "appRoles": [],
+    "keyCredentials": [],
+    "oauth2PermissionScopes": [],
+    "passwordCredentials": [],
+    "resourceSpecificApplicationPermissions": [],
+    "appRoleAssignedTo@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals('77ad36cd-bda9-45ce-bb3d-447de5695952')/appRoleAssignedTo",
+    "appRoleAssignedTo": [
+        {
+            "id": "GHcbuZqRg0qnD2dK-DjPbytTQ062GAVIkR7Xb-jS6kQ",
+            "deletedDateTime": null,
+            "appRoleId": "00000000-0000-0000-0000-000000000000",
+            "createdDateTime": "2026-03-16T13:04:40.4650581Z",
+            "principalDisplayName": "Jesus Fernandez (DEV)",
+            "principalId": "b91b7718-919a-4a83-a70f-674af838cf6f",
+            "principalType": "User",
+            "resourceDisplayName": "App roles client",
+            "resourceId": "77ad36cd-bda9-45ce-bb3d-447de5695952"
+        },
+        {
+            "id": "LdPeZu6CQ0CyLunio4DDymzgN4TW6CJMocnGn2OGN9o",
+            "deletedDateTime": null,
+            "appRoleId": "00000000-0000-0000-0000-000000000000",
+            "createdDateTime": "2026-04-22T09:00:08.0694056Z",
+            "principalDisplayName": "Device Orders",
+            "principalId": "66ded32d-82ee-4043-b22e-e9e2a380c3ca",
+            "principalType": "Group",
+            "resourceDisplayName": "App roles client",
+            "resourceId": "77ad36cd-bda9-45ce-bb3d-447de5695952"
+        }
+    ]
+}

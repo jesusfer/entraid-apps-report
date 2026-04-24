@@ -1,0 +1,29 @@
+{
+    "uri": "https://graph.microsoft.com/v1.0/servicePrincipals/77ad36cd-bda9-45ce-bb3d-447de5695952/appRoleAssignments",
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#appRoleAssignments",
+    "@microsoft.graph.tips": "Use $select to choose only the properties your app needs, as this can lead to performance improvements. For example: GET servicePrincipals('<guid>')/appRoleAssignments?$select=appRoleId,createdDateTime",
+    "value": [
+        {
+            "id": "zTatd6m9zkW7PUR95WlZUhOrIR3k-h9JoOPFZctLaxg",
+            "deletedDateTime": null,
+            "appRoleId": "82ff019d-32ec-4fd6-a6aa-2a01fbd1bbcf",
+            "createdDateTime": "2026-03-16T13:13:37.5314084Z",
+            "principalDisplayName": "App roles client",
+            "principalId": "77ad36cd-bda9-45ce-bb3d-447de5695952",
+            "principalType": "ServicePrincipal",
+            "resourceDisplayName": "App roles API",
+            "resourceId": "f6982e6a-2065-47b0-9ab8-be533e0ffe31"
+        },
+        {
+            "id": "zTatd6m9zkW7PUR95WlZUr7JD1Rsz1dHvRsxvY7Y7PI",
+            "deletedDateTime": null,
+            "appRoleId": "98bbccbf-8874-414a-9845-bfad7e390331",
+            "createdDateTime": "2026-03-16T13:04:40.2070576Z",
+            "principalDisplayName": "App roles client",
+            "principalId": "77ad36cd-bda9-45ce-bb3d-447de5695952",
+            "principalType": "ServicePrincipal",
+            "resourceDisplayName": "App roles API",
+            "resourceId": "f6982e6a-2065-47b0-9ab8-be533e0ffe31"
+        }
+    ]
+}

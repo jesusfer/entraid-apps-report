@@ -1,0 +1,105 @@
+{
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals(accountEnabled,appId,appRoleAssignmentRequired,appRoles,displayName,id,keyCredentials,notes,oauth2PermissionScopes,passwordCredentials,preferredSingleSignOnMode,replyUrls,resourceSpecificApplicationPermissions,samlSingleSignOnSettings,servicePrincipalNames,servicePrincipalType,signInAudience,appRoleAssignedTo())/$entity",
+    "accountEnabled": true,
+    "appId": "4b0a3ae8-2f32-4f30-be47-37776ca0d39d",
+    "appRoleAssignmentRequired": false,
+    "displayName": "App roles API",
+    "id": "f6982e6a-2065-47b0-9ab8-be533e0ffe31",
+    "notes": null,
+    "preferredSingleSignOnMode": null,
+    "replyUrls": [],
+    "servicePrincipalNames": [
+        "api://4b0a3ae8-2f32-4f30-be47-37776ca0d39d",
+        "4b0a3ae8-2f32-4f30-be47-37776ca0d39d"
+    ],
+    "servicePrincipalType": "Application",
+    "signInAudience": "AzureADMyOrg",
+    "samlSingleSignOnSettings": null,
+    "appRoles": [
+        {
+            "allowedMemberTypes": [
+                "User",
+                "Application"
+            ],
+            "description": "Write.All",
+            "displayName": "Write.All",
+            "id": "98bbccbf-8874-414a-9845-bfad7e390331",
+            "isEnabled": true,
+            "origin": "Application",
+            "value": "Write.All"
+        },
+        {
+            "allowedMemberTypes": [
+                "User",
+                "Application"
+            ],
+            "description": "Read.All",
+            "displayName": "Read.All",
+            "id": "82ff019d-32ec-4fd6-a6aa-2a01fbd1bbcf",
+            "isEnabled": true,
+            "origin": "Application",
+            "value": "Read.All"
+        }
+    ],
+    "keyCredentials": [],
+    "oauth2PermissionScopes": [
+        {
+            "adminConsentDescription": "Read",
+            "adminConsentDisplayName": "Read",
+            "id": "0cd0998e-7b8b-406e-a229-d50250c24c30",
+            "isEnabled": true,
+            "type": "User",
+            "userConsentDescription": null,
+            "userConsentDisplayName": null,
+            "value": "Read"
+        },
+        {
+            "adminConsentDescription": "user_impersonation",
+            "adminConsentDisplayName": "user_impersonation",
+            "id": "e5d6b3cd-30ca-46ec-aca2-e155ea8e2b0e",
+            "isEnabled": true,
+            "type": "User",
+            "userConsentDescription": null,
+            "userConsentDisplayName": null,
+            "value": "user_impersonation"
+        }
+    ],
+    "passwordCredentials": [],
+    "resourceSpecificApplicationPermissions": [],
+    "appRoleAssignedTo@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals('f6982e6a-2065-47b0-9ab8-be533e0ffe31')/appRoleAssignedTo",
+    "appRoleAssignedTo": [
+        {
+            "id": "zTatd6m9zkW7PUR95WlZUhOrIR3k-h9JoOPFZctLaxg",
+            "deletedDateTime": null,
+            "appRoleId": "82ff019d-32ec-4fd6-a6aa-2a01fbd1bbcf",
+            "createdDateTime": "2026-03-16T13:13:37.5314084Z",
+            "principalDisplayName": "App roles client",
+            "principalId": "77ad36cd-bda9-45ce-bb3d-447de5695952",
+            "principalType": "ServicePrincipal",
+            "resourceDisplayName": "App roles API",
+            "resourceId": "f6982e6a-2065-47b0-9ab8-be533e0ffe31"
+        },
+        {
+            "id": "zTatd6m9zkW7PUR95WlZUr7JD1Rsz1dHvRsxvY7Y7PI",
+            "deletedDateTime": null,
+            "appRoleId": "98bbccbf-8874-414a-9845-bfad7e390331",
+            "createdDateTime": "2026-03-16T13:04:40.2070576Z",
+            "principalDisplayName": "App roles client",
+            "principalId": "77ad36cd-bda9-45ce-bb3d-447de5695952",
+            "principalType": "ServicePrincipal",
+            "resourceDisplayName": "App roles API",
+            "resourceId": "f6982e6a-2065-47b0-9ab8-be533e0ffe31"
+        },
+        {
+            "id": "hRBOV7GNtkq92gDWJdQzfNAFvML2YJRMpiHKJWJM-SA",
+            "deletedDateTime": null,
+            "appRoleId": "82ff019d-32ec-4fd6-a6aa-2a01fbd1bbcf",
+            "createdDateTime": "2026-04-21T14:31:33.8087673Z",
+            "principalDisplayName": "Adele Vance",
+            "principalId": "574e1085-8db1-4ab6-bdda-00d625d4337c",
+            "principalType": "User",
+            "resourceDisplayName": "App roles API",
+            "resourceId": "f6982e6a-2065-47b0-9ab8-be533e0ffe31"
+        }
+    ]
+}

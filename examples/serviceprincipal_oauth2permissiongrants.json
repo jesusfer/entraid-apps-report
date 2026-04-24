@@ -1,0 +1,31 @@
+{
+    "uri": "https://graph.microsoft.com/v1.0/servicePrincipals/77ad36cd-bda9-45ce-bb3d-447de5695952/oauth2PermissionGrants",
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#oauth2PermissionGrants",
+    "@microsoft.graph.tips": "Use $select to choose only the properties your app needs, as this can lead to performance improvements. For example: GET servicePrincipals('<guid>')/oauth2PermissionGrants?$select=clientId,consentType",
+    "value": [
+        {
+            "clientId": "77ad36cd-bda9-45ce-bb3d-447de5695952",
+            "consentType": "Principal",
+            "id": "zTatd6m9zkW7PUR95WlZUqADUn3kXStAlHXbx2pNCTAYdxu5mpGDSqcPZ0r4OM9v",
+            "principalId": "b91b7718-919a-4a83-a70f-674af838cf6f",
+            "resourceId": "7d5203a0-5de4-402b-9475-dbc76a4d0930",
+            "scope": " openid profile offline_access User.Read email"
+        },
+        {
+            "clientId": "77ad36cd-bda9-45ce-bb3d-447de5695952",
+            "consentType": "AllPrincipals",
+            "id": "zTatd6m9zkW7PUR95WlZUmoumPZlILBHmri-Uz4P_jE",
+            "principalId": null,
+            "resourceId": "f6982e6a-2065-47b0-9ab8-be533e0ffe31",
+            "scope": "Read user_impersonation"
+        },
+        {
+            "clientId": "77ad36cd-bda9-45ce-bb3d-447de5695952",
+            "consentType": "Principal",
+            "id": "zTatd6m9zkW7PUR95WlZUmoumPZlILBHmri-Uz4P_jEYdxu5mpGDSqcPZ0r4OM9v",
+            "principalId": "b91b7718-919a-4a83-a70f-674af838cf6f",
+            "resourceId": "f6982e6a-2065-47b0-9ab8-be533e0ffe31",
+            "scope": " user_impersonation Read"
+        }
+    ]
+}

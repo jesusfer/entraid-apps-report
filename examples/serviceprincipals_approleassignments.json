@@ -1,0 +1,43 @@
+{
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals(id,appRoleAssignments())",
+    "@odata.nextLink": "https://graph.microsoft.com/v1.0/servicePrincipals?$select=id&$expand=appRoleAssignments&$skiptoken=RFNwdAIAAQAAADVTZXJ2aWNlUHJpbmNpcGFsXzRiMWQwZjAyLTUxNzMtNGNhNy1hZDRkLTY2YzQ3ODg1MDMwMzVTZXJ2aWNlUHJpbmNpcGFsXzRiMWQwZjAyLTUxNzMtNGNhNy1hZDRkLTY2YzQ3ODg1MDMwMwAAAAAAAAAAAAAA",
+    "value": [
+        {
+            "id": "007d1bf5-c775-4966-9884-d66f6888d129",
+            "appRoleAssignments@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals('007d1bf5-c775-4966-9884-d66f6888d129')/appRoleAssignments",
+            "appRoleAssignments": []
+        },
+        {
+            "id": "01d1c304-f5e0-4013-9d92-1f7edf975340",
+            "appRoleAssignments@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals('01d1c304-f5e0-4013-9d92-1f7edf975340')/appRoleAssignments",
+            "appRoleAssignments": []
+        },
+        {
+            "id": "0256d993-ef67-4cc9-ab18-0cf978435dcc",
+            "appRoleAssignments@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals('0256d993-ef67-4cc9-ab18-0cf978435dcc')/appRoleAssignments",
+            "appRoleAssignments": []
+        },
+        {
+            "id": "03772fab-f2f4-4681-9442-3c93ca4dcb45",
+            "appRoleAssignments@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals('03772fab-f2f4-4681-9442-3c93ca4dcb45')/appRoleAssignments",
+            "appRoleAssignments": []
+        },
+        {
+            "id": "0391d692-d739-445d-bc91-ded63fcd58a4",
+            "appRoleAssignments@odata.context": "https://graph.microsoft.com/v1.0/$metadata#servicePrincipals('0391d692-d739-445d-bc91-ded63fcd58a4')/appRoleAssignments",
+            "appRoleAssignments": [
+                {
+                    "id": "ktaRAznXXUS8kd7WP81YpLW8JlE6bMFOhiGtM3XZwW8",
+                    "deletedDateTime": null,
+                    "appRoleId": "5e1e9171-754d-478c-812c-f1755a9a4c2d",
+                    "createdDateTime": "2025-10-20T09:44:55.3708446Z",
+                    "principalDisplayName": "CoE Audit",
+                    "principalId": "0391d692-d739-445d-bc91-ded63fcd58a4",
+                    "principalType": "ServicePrincipal",
+                    "resourceDisplayName": "Microsoft Graph",
+                    "resourceId": "7d5203a0-5de4-402b-9475-dbc76a4d0930"
+                }
+            ]
+        }
+    ]
+}

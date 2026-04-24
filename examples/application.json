@@ -1,0 +1,179 @@
+{
+    "uri": "https://graph.microsoft.com/v1.0/applications/f8fa5f8a-e681-48ae-ad9b-a3a81b819429?$select=api,appId,appRoles,createdDateTime,displayName,id,identifierUris,isDeviceOnlyAuthSupported,isFallbackPublicClient,keyCredentials,passwordCredentials,publicClient,requiredResourceAccess,samlMetadataUrl,signInAudience,spa,tags,web&$expand=owners($levels=max;$select=id,displayName,userPrincipalName,mail)",
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#applications(owners(id,displayName,userPrincipalName,mail))/$entity",
+    "@microsoft.graph.tips": "Use $select to choose only the properties your app needs, as this can lead to performance improvements. For example: GET applications('<guid>')?$select=addIns,api",
+    "id": "f8fa5f8a-e681-48ae-ad9b-a3a81b819429",
+    "deletedDateTime": null,
+    "appId": "4b0a3ae8-2f32-4f30-be47-37776ca0d39d",
+    "applicationTemplateId": null,
+    "disabledByMicrosoftStatus": null,
+    "createdByAppId": "18ed3507-a475-4ccb-b669-d66bc9f2a36e",
+    "createdDateTime": "2026-03-16T09:55:27Z",
+    "displayName": "App roles API",
+    "description": null,
+    "groupMembershipClaims": null,
+    "identifierUris": [
+        "api://4b0a3ae8-2f32-4f30-be47-37776ca0d39d"
+    ],
+    "isDeviceOnlyAuthSupported": null,
+    "isDisabled": null,
+    "isFallbackPublicClient": false,
+    "nativeAuthenticationApisEnabled": null,
+    "notes": null,
+    "publisherDomain": "jesusferdev.onmicrosoft.com",
+    "serviceManagementReference": null,
+    "signInAudience": "AzureADMyOrg",
+    "tags": [],
+    "tokenEncryptionKeyId": null,
+    "uniqueName": null,
+    "samlMetadataUrl": null,
+    "defaultRedirectUri": null,
+    "certification": null,
+    "optionalClaims": null,
+    "requestSignatureVerification": null,
+    "addIns": [],
+    "api": {
+        "acceptMappedClaims": null,
+        "knownClientApplications": [],
+        "requestedAccessTokenVersion": null,
+        "oauth2PermissionScopes": [
+            {
+                "adminConsentDescription": "Read",
+                "adminConsentDisplayName": "Read",
+                "id": "0cd0998e-7b8b-406e-a229-d50250c24c30",
+                "isEnabled": true,
+                "type": "User",
+                "userConsentDescription": null,
+                "userConsentDisplayName": null,
+                "value": "Read"
+            },
+            {
+                "adminConsentDescription": "user_impersonation",
+                "adminConsentDisplayName": "user_impersonation",
+                "id": "e5d6b3cd-30ca-46ec-aca2-e155ea8e2b0e",
+                "isEnabled": true,
+                "type": "User",
+                "userConsentDescription": null,
+                "userConsentDisplayName": null,
+                "value": "user_impersonation"
+            }
+        ],
+        "preAuthorizedApplications": [
+            {
+                "appId": "aa29efed-58e7-4651-a15f-7a6d68557a89",
+                "delegatedPermissionIds": [
+                    "e5d6b3cd-30ca-46ec-aca2-e155ea8e2b0e"
+                ]
+            }
+        ]
+    },
+    "appRoles": [
+        {
+            "allowedMemberTypes": [
+                "User",
+                "Application"
+            ],
+            "description": "Write.All",
+            "displayName": "Write.All",
+            "id": "98bbccbf-8874-414a-9845-bfad7e390331",
+            "isEnabled": true,
+            "origin": "Application",
+            "value": "Write.All"
+        },
+        {
+            "allowedMemberTypes": [
+                "User",
+                "Application"
+            ],
+            "description": "Read.All",
+            "displayName": "Read.All",
+            "id": "82ff019d-32ec-4fd6-a6aa-2a01fbd1bbcf",
+            "isEnabled": true,
+            "origin": "Application",
+            "value": "Read.All"
+        }
+    ],
+    "info": {
+        "logoUrl": null,
+        "marketingUrl": null,
+        "privacyStatementUrl": null,
+        "supportUrl": null,
+        "termsOfServiceUrl": null
+    },
+    "keyCredentials": [
+        {
+            "customKeyIdentifier": "BE12747DC04777D3343DCFDBC4E5519F34FFC9EF",
+            "displayName": "CN=SPO Sites.Selected",
+            "endDateTime": "2026-05-01T00:00:00Z",
+            "key": null,
+            "keyId": "056201bb-2fbe-4812-b911-55594c199c81",
+            "startDateTime": "2025-05-01T00:00:00Z",
+            "type": "AsymmetricX509Cert",
+            "usage": "Verify"
+        }
+    ],
+    "parentalControlSettings": {
+        "countriesBlockedForMinors": [],
+        "legalAgeGroupRule": "Allow"
+    },
+    "passwordCredentials": [
+        {
+            "customKeyIdentifier": null,
+            "displayName": "Password uploaded on Mon Mar 16 2026",
+            "endDateTime": "2026-09-12T11:05:44.433Z",
+            "hint": "o0q",
+            "keyId": "9b8d5aee-9436-48cb-ac75-ce14c9baad79",
+            "secretText": null,
+            "startDateTime": "2026-03-16T12:05:44.433Z"
+        }
+    ],
+    "publicClient": {
+        "redirectUris": []
+    },
+    "requiredResourceAccess": [
+        {
+            "resourceAppId": "00000003-0000-0000-c000-000000000000",
+            "resourceAccess": [
+                {
+                    "id": "e1fe6dd8-ba31-4d61-89e7-88639da4683d",
+                    "type": "Scope"
+                }
+            ]
+        }
+    ],
+    "verifiedPublisher": {
+        "displayName": null,
+        "verifiedPublisherId": null,
+        "addedDateTime": null
+    },
+    "web": {
+        "homePageUrl": null,
+        "logoutUrl": null,
+        "redirectUris": [],
+        "implicitGrantSettings": {
+            "enableAccessTokenIssuance": false,
+            "enableIdTokenIssuance": false
+        },
+        "redirectUriSettings": []
+    },
+    "servicePrincipalLockConfiguration": {
+        "isEnabled": true,
+        "allProperties": true,
+        "credentialsWithUsageVerify": true,
+        "credentialsWithUsageSign": true,
+        "identifierUris": false,
+        "tokenEncryptionKeyId": true
+    },
+    "spa": {
+        "redirectUris": []
+    },
+    "owners": [
+        {
+            "@odata.type": "#microsoft.graph.user",
+            "id": "b91b7718-919a-4a83-a70f-674af838cf6f",
+            "displayName": "Jesus Fernandez (DEV)",
+            "userPrincipalName": "jesus@jesusferdev.onmicrosoft.com",
+            "mail": "jesus@jesusferdev.onmicrosoft.com"
+        }
+    ]
+}

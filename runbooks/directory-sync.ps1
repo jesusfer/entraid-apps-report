@@ -36,14 +36,15 @@ function Start-Work {
     $table = Get-StorageTable -AzureContext $azureContext -TableName "Applications"
     Clear-Table $table
     # Get data from Graph
-    $apps = Get-AADApps
+    $apps = Get-AppRegistrations
     Set-ApplicationsInStorage -Applications $apps -StorageTable $table
 
     # Service Principals
     $table = Get-StorageTable -AzureContext $azureContext -TableName "ServicePrincipals"
     Clear-Table $table
-    $servicePrincipals = Get-AADServicePrincipals
-    Set-ServicePrincipalsInStorage -ServicePrincipals $servicePrincipals -StorageTable $table
+    $servicePrincipals = Get-ServicePrincipals
+    $servicePrincipalsAppRoleAssignments = Get-ServicePrincipalsAppRolesAssignments
+    Set-ServicePrincipalsInStorage -ServicePrincipals $servicePrincipals -AppRoleAssignments $servicePrincipalsAppRoleAssignments -StorageTable $table 
 }
 
 # Helper functions
@@ -65,6 +66,7 @@ function IfNull {
 function Set-ServicePrincipalsInStorage {
     param(
         $ServicePrincipals,
+        $AppRoleAssignments,
         $StorageTable
     )
     $table = $StorageTable.CloudTable
@@ -218,10 +220,34 @@ function Set-ServicePrincipalsInStorage {
                 CreatedDateTime      = IfNull $assignment.createdDateTime
                 PrincipalType        = $assignment.principalType
                 PrincipalDisplayName = $assignment.principalDisplayName
+                # Object Id of the service principal, user, group or service principal that consumes the role
                 PrincipalId          = $assignment.principalId
             }
-            Write-Verbose ($servicePrincipal | ConvertTo-Json -Depth 5)
-            Write-Verbose ($properties | ConvertTo-Json -Depth 5)
+            # Write-Verbose ($servicePrincipal | ConvertTo-Json -Depth 5)
+            # Write-Verbose ($properties | ConvertTo-Json -Depth 5)
+            $params = @{
+                Table        = $table
+                PartitionKey = $pk
+                RowKey       = $rk
+                Property     = $properties
+            }
+            Add-AzTableRow @params | Out-Null
+        }
+
+        # Este listado son los roles que este service principal consume de otros SPs y para los que tiene admin grant
+        Write-Verbose "ServiceApplication $($servicePrincipal.appId) appRoleAssignments"
+        $roleAssignments = $AppRoleAssignments | Where-Object { $_.id -eq $servicePrincipal.id } | Select-Object -ExpandProperty appRoleAssignments
+        foreach ($assignment in $roleAssignments) {
+            $rk = "AppRolesAssignment-$($assignment.id)"
+            $properties = @{
+                ApplicationId       = $servicePrincipal.appId
+                AssignmentId        = $assignment.id
+                AppRoleId           = $assignment.appRoleId
+                CreatedDateTime     = IfNull $assignment.createdDateTime
+                ResourceDisplayName = $assignment.resourceDisplayName
+                # Object Id of the service principal that exposes the role
+                ResourceId          = $assignment.resourceId
+            }
             $params = @{
                 Table        = $table
                 PartitionKey = $pk
@@ -459,20 +485,131 @@ function Connect-ManagedIdentity {
     }
 }
 
-function Get-AADApps {
+function Get-AppRegistrations {
     param()
-    $path = '/applications?$select=api,appId,appRoles,createdDateTime,displayName,id,identifierUris,isDeviceOnlyAuthSupported,isFallbackPublicClient,keyCredentials,passwordCredentials,publicClient,requiredResourceAccess,samlMetadataUrl,signInAudience,spa,tags,web&$expand=owners($levels=max;$select=id,displayName,userPrincipalName,mail)'
+    $props = @(
+        # Specifies settings for an application that implements a web API
+        # App registration -> Expose an API
+        # api.oauth2PermissionScopes[] -> Declared scopes
+        # api.preAuthorizedApplications[] -> Pre-authorized applications
+        "api",
+        # The unique identifier for the application that is assigned to an application by Microsoft Entra ID
+        "appId",
+        # The collection of roles defined for the application. With app role assignments, these roles can be assigned to users, groups, or service principals associated with other applications
+        # App registration -> App roles
+        "appRoles",
+        # The date and time the application was registered
+        "createdDateTime",
+        # The display name for the application
+        "displayName",
+        # Unique identifier for the application object. This property is referred to as Object ID in the Microsoft Entra admin center
+        "id",
+        # Also known as App ID URI, this value is set when an application is used as a resource app
+        # App registration -> Expose an API -> Application ID URI
+        "identifierUris",
+        # Specifies whether this application supports device authentication without a user
+        "isDeviceOnlyAuthSupported",
+        # Specifies the fallback application type as public client, such as an installed application running on a mobile device
+        "isFallbackPublicClient",
+        # The collection of key (certificates) credentials associated with the application
+        # App registration -> Certificates & secrets -> Certificates
+        "keyCredentials",
+        # The collection of password (secrets) credentials associated with the application
+        # App registration -> Certificates & secrets -> Client secrets
+        "passwordCredentials",
+        # Specifies settings for installed clients such as desktop or mobile devices
+        "publicClient",
+        # Specifies the resources that the application needs to access. This property also specifies the set of delegated permissions and application roles that it needs for each of those resources. This configuration of access to the required resources drives the consent experience
+        # App registration -> API permissions -> Configured permissions
+        "requiredResourceAccess",
+        # The URL where the service exposes SAML metadata for federation
+        "samlMetadataUrl",
+        # Specifies the Microsoft accounts that are supported for the current application. The possible values are: AzureADMyOrg (default), AzureADMultipleOrgs, AzureADandPersonalMicrosoftAccount, and PersonalMicrosoftAccount
+        "signInAudience",
+        # Specifies settings for a single-page application, including sign out URLs and redirect URIs for authorization codes and access tokens
+        "spa",
+        # Custom strings that can be used to categorize and identify the application
+        "tags",
+        # Specifies settings for a web application
+        "web"
+    ) -join ','
+    # owners
+    # Directory objects that are owners of this application
+    $path = "/applications?`$select=$props&`$expand=owners(`$select=id,displayName,userPrincipalName,mail)"
     $applications = Invoke-PaginatedGraphList -Path $path
     Write-Verbose "Got $($applications.Count) apps"
     return $applications
 }
 
-function Get-AADServicePrincipals {
+function Get-ServicePrincipals {
     param()
-    $path = '/servicePrincipals?$select=accountEnabled,appId,appRoleAssignmentRequired,appRoles,displayName,id,keyCredentials,notes,oauth2PermissionScopes,passwordCredentials,preferredSingleSignOnMode,replyUrls,resourceSpecificApplicationPermissions,samlSingleSignOnSettings,servicePrincipalNames,servicePrincipalType,signInAudience&$expand=appRoleAssignedTo'
+    $props = @(
+        # true if the service principal account is enabled; otherwise, false. 
+        "accountEnabled",
+        # The unique identifier for the associated application (its appId property).
+        "appId",
+        # Specifies whether users or other service principals need to be granted an app role assignment for this service principal before users can sign in or apps can get tokens.
+        "appRoleAssignmentRequired",
+        # The roles exposed by the application that's linked to this service principal.
+        "appRoles",
+        # The display name of the service principal.
+        "displayName",
+        # The unique identifier for the service principal.
+        "id",
+        # The collection of key credentials associated with the service principal.
+        "keyCredentials",
+        # Notes associated with the service principal.
+        "notes",
+        # The delegated permissions exposed by the application.
+        "oauth2PermissionScopes",
+        # The collection of password credentials associated with the application.
+        "passwordCredentials",
+        # Specifies the single sign-on mode configured for this application.
+        "preferredSingleSignOnMode",
+        # The URLs that user tokens are sent to for sign in with the associated application, or the redirect URIs that OAuth 2.0 authorization codes and access tokens are sent to for the associated application
+        "replyUrls",
+        # The resource-specific application permissions exposed by this application.
+        "resourceSpecificApplicationPermissions",
+        # The collection for settings related to saml single sign-on.
+        "samlSingleSignOnSettings",
+        # Contains the list of identifiersUris, copied over from the associated application
+        "servicePrincipalNames",
+        <# Identifies whether the service principal represents an application, a managed identity, or a legacy application. This property is set by Microsoft Entra ID internally. The servicePrincipalType property can be set to three different values:
+        * Application - A service principal that represents an application or service
+        * ManagedIdentity - A service principal that represents a managed identity
+        * Legacy - A service principal that represents an app created before app registrations, or through legacy experiences
+        * ServiceIdentity - A service principal that represents an agent identity
+        * SocialIdp - For internal use
+        #>
+        # Identifies whether the service principal represents an application, a managed identity, or a legacy application
+        "servicePrincipalType",
+        <# Specifies the Microsoft accounts that are supported for the current application. Supported values are:
+        * AzureADMyOrg: Users with a Microsoft work or school account in my organization's Microsoft Entra tenant (single-tenant).
+        * AzureADMultipleOrgs: Users with a Microsoft work or school account in any organization's Microsoft Entra tenant (multitenant).
+        * AzureADandPersonalMicrosoftAccount: Users with a personal Microsoft account, or a work or school account in any organization's Microsoft Entra tenant.
+        * PersonalMicrosoftAccount: Users with a personal Microsoft account only.
+        #>
+        "signInAudience"
+    ) -join ','
+    # appRoleAssignedTo
+    # App role assignments for this app or service, granted to users, groups, and other service principals.
+    # -> Users and groups
+    $path = "/servicePrincipals?`$select=$props&`$expand=appRoleAssignedTo"
     $servicePrincipals = Invoke-PaginatedGraphList -Path $path
     Write-Verbose "Got $($servicePrincipals.Count) service principals"
     return $servicePrincipals
+}
+
+
+function Get-ServicePrincipalsAppRolesAssignments {
+    param()
+    # appRoleAssignments
+    # App role assignment for another app or service, granted to this service principal
+    # App registration -> API Permissions -> Configured Permissions (Type Application)
+    $path = "/servicePrincipals?`$select=id&`$expand=appRoleAssignments"
+    $appRoleAssignments = Invoke-PaginatedGraphList -Path $path
+    Write-Verbose "Got $($appRoleAssignments.Count) service principals app role assignments"
+    return $appRoleAssignments
 }
 
 function Get-GraphToken {
