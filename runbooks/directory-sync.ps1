@@ -44,13 +44,16 @@ function Start-Work {
     $servicePrincipalsGrants = Get-ServicePrincipalsGrants -ServicePrincipals $servicePrincipals
     $servicePrincipalsAppRoleAssignments = Get-ServicePrincipalsAppRolesAssignments
 
-    $table = Get-StorageTable -AzureContext $azureContext -TableName "ServicePrincipals"
-    Clear-Table $table
+    $spTable = Get-StorageTable -AzureContext $azureContext -TableName "ServicePrincipals"
+    Clear-Table $spTable
+    $principalsTable = Get-StorageTable -AzureContext $azureContext -TableName "Principals"
+    Clear-Table $principalsTable
     $params = @{
         ServicePrincipals  = $servicePrincipals
         AppRoleAssignments = $servicePrincipalsAppRoleAssignments
         AllGrants          = $servicePrincipalsGrants
-        StorageTable       = $table
+        StorageTable       = $spTable
+        PrincipalsTable    = $principalsTable
     }
     Set-ServicePrincipalsInStorage @params
 }
@@ -76,9 +79,11 @@ function Set-ServicePrincipalsInStorage {
         $ServicePrincipals,
         $AppRoleAssignments,
         $AllGrants,
-        $StorageTable
+        $StorageTable,
+        $PrincipalsTable
     )
     $table = $StorageTable.CloudTable
+    $pTable = $PrincipalsTable.CloudTable
 
     Write-Verbose "Saving the service principals in storage"
     foreach ($servicePrincipal in $ServicePrincipals) {
@@ -277,7 +282,6 @@ function Set-ServicePrincipalsInStorage {
                 PrincipalId = IfNull $grant.principalId
                 ResourceId  = $grant.resourceId
                 Scopes      = $grant.scope
-                GrantedBy   = If ($grant.consentType -eq 'AllPrincipals') { 'Admin' } else { 'User' }
             }
             $params = @{
                 Table        = $table
@@ -286,6 +290,23 @@ function Set-ServicePrincipalsInStorage {
                 Property     = $properties
             }
             Add-AzTableRow @params | Out-Null
+
+            if ($grant.principal) {
+                $properties = @{
+                    UPN         = $grant.principal.userPrincipalName
+                    DisplayName = IfNull $grant.principal.displayName $grant.principal.userPrincipalName
+                    Mail        = IfNull $grant.principal.mail
+                    State       = IfNull $grant.principal.state
+                }
+                $rk = $grant.principalId
+                $params = @{
+                    Table        = $pTable
+                    PartitionKey = "Users"
+                    RowKey       = $rk
+                    Property     = $properties
+                }
+                Add-AzTableRow @params | Out-Null
+            }
         }
     }
 }
@@ -356,7 +377,7 @@ function Set-ApplicationsInStorage {
                 ObjectId      = $application.id
                 ApplicationId = $application.appId
                 KeyId         = $password.keyId
-                Name          = IfNull $password.displayName"Unnamed secret"
+                Name          = IfNull $password.displayName "Unnamed secret"
                 EndDateTime   = $password.endDateTime
             }
             $params = @{
@@ -398,6 +419,7 @@ function Set-ApplicationsInStorage {
                 ApplicationId = $application.appId
                 UPN           = $upn
                 Mail          = IfNull $owner.mail
+                State         = IfNull $owner.state
             }
             $params = @{
                 Table        = $table
@@ -566,7 +588,7 @@ function Get-AppRegistrations {
     ) -join ','
     # owners
     # Directory objects that are owners of this application
-    $path = "/applications?`$select=$props&`$expand=owners(`$select=id,displayName,userPrincipalName,mail)"
+    $path = "/applications?`$select=$props&`$expand=owners(`$select=id,displayName,userPrincipalName,mail,state)"
     $applications = Invoke-PaginatedGraphList -Path $path
     Write-Verbose "Got $($applications.Count) apps"
     return $applications
@@ -635,6 +657,7 @@ function Get-ServicePrincipalsGrants {
     param($ServicePrincipals)
 
     $results = @()
+    $resolvedPrincipals = @()
     foreach ($servicePrincipal in $ServicePrincipals) {
         # oauth2PermissionGrants
         # Delegated permission grants authorizing this service principal to access an API on behalf of a signed-in user
@@ -644,14 +667,36 @@ function Get-ServicePrincipalsGrants {
         $path = "/servicePrincipals/$($servicePrincipal.id)/oauth2PermissionGrants"
         $grants = Invoke-Graph -Path $path
         if ($grants.value) {
+            $updatedGrants = @()
+            foreach ($grant in $grants.value) {
+                if ($grant.principalId -and $grant.principalId -notin $resolvedPrincipals) {
+                    $userDetails = Get-UserDetails -UserId $grant.principalId
+                    $grantDict = @{}
+                    foreach ($prop in $grant.PSObject.Properties) {
+                        $grantDict[$prop.Name] = $prop.Value
+                    }
+                    $grantDict["principal"] = $userDetails
+                    $resolvedPrincipals += $grant.principalId
+                    $updatedGrants += $grantDict
+                } else {
+                    $updatedGrants += $grant
+                }
+            }
             $results += @{
                 id                     = $servicePrincipal.id
-                oauth2PermissionGrants = $grants.value
+                oauth2PermissionGrants = $updatedGrants
             }
         }
     }
     Write-Verbose "Got $($results.Count) service principals oauth2 permission grants"
     return $results
+}
+
+function Get-UserDetails {
+    param($UserId)
+    $path = "/users/$($UserId)?`$select=displayName,userPrincipalName,mail,state"
+    $details = Invoke-Graph -Path $path
+    return $details
 }
 
 function Get-ServicePrincipalsAppRolesAssignments {
