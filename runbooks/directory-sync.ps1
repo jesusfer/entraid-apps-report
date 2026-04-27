@@ -33,18 +33,26 @@ function Start-Work {
     $azureContext = Connect-ManagedIdentity
 
     # App Registrations
-    $table = Get-StorageTable -AzureContext $azureContext -TableName "Applications"
-    Clear-Table $table
-    # Get data from Graph
     $apps = Get-AppRegistrations
     Set-ApplicationsInStorage -Applications $apps -StorageTable $table
 
+    $table = Get-StorageTable -AzureContext $azureContext -TableName "Applications"
+    Clear-Table $table
+
     # Service Principals
+    $servicePrincipals = Get-ServicePrincipals
+    $servicePrincipalsGrants = Get-ServicePrincipalsGrants -ServicePrincipals $servicePrincipals
+    $servicePrincipalsAppRoleAssignments = Get-ServicePrincipalsAppRolesAssignments
+
     $table = Get-StorageTable -AzureContext $azureContext -TableName "ServicePrincipals"
     Clear-Table $table
-    $servicePrincipals = Get-ServicePrincipals
-    $servicePrincipalsAppRoleAssignments = Get-ServicePrincipalsAppRolesAssignments
-    Set-ServicePrincipalsInStorage -ServicePrincipals $servicePrincipals -AppRoleAssignments $servicePrincipalsAppRoleAssignments -StorageTable $table 
+    $params = @{
+        ServicePrincipals  = $servicePrincipals
+        AppRoleAssignments = $servicePrincipalsAppRoleAssignments
+        AllGrants          = $servicePrincipalsGrants
+        StorageTable       = $table
+    }
+    Set-ServicePrincipalsInStorage @params
 }
 
 # Helper functions
@@ -67,6 +75,7 @@ function Set-ServicePrincipalsInStorage {
     param(
         $ServicePrincipals,
         $AppRoleAssignments,
+        $AllGrants,
         $StorageTable
     )
     $table = $StorageTable.CloudTable
@@ -124,7 +133,7 @@ function Set-ServicePrincipalsInStorage {
         Write-Verbose "ServiceApplication $($servicePrincipal.appId) scopes"
         foreach ($scope in $servicePrincipal.oauth2PermissionScopes) {
             $rk = "Scope-$($scope.id)"
-            Write-Verbose $rk
+            # Write-Verbose $rk
             $properties = @{
                 ApplicationId = $servicePrincipal.appId
                 DisplayName   = $scope.adminConsentDisplayName
@@ -144,7 +153,7 @@ function Set-ServicePrincipalsInStorage {
         Write-Verbose "ServiceApplication $($servicePrincipal.appId) roles"
         foreach ($role in $servicePrincipal.appRoles) {
             $rk = "Role-$($role.id)"
-            Write-Verbose $rk
+            # Write-Verbose $rk
             $properties = @{
                 ApplicationId = $servicePrincipal.appId
                 DisplayName   = $role.displayName
@@ -174,8 +183,8 @@ function Set-ServicePrincipalsInStorage {
                 Type             = IfNull $key.type 'Unknown'
                 Thumbprint       = IfNull $key.customKeyIdentifier 'Unknown'
             }
-            Write-Verbose ($servicePrincipal | ConvertTo-Json -Depth 5)
-            Write-Verbose ($properties | ConvertTo-Json -Depth 5)
+            # Write-Verbose ($servicePrincipal | ConvertTo-Json -Depth 5)
+            # Write-Verbose ($properties | ConvertTo-Json -Depth 5)
             $params = @{
                 Table        = $table
                 PartitionKey = $pk
@@ -256,6 +265,28 @@ function Set-ServicePrincipalsInStorage {
             }
             Add-AzTableRow @params | Out-Null
         }
+
+        # Listado de permisos delegados que este service principal tiene concedidos por admin consent
+        Write-Verbose "ServiceApplication $($servicePrincipal.appId) oauth2PermissionGrants"
+        $grants = $AllGrants | Where-Object { $_.id -eq $servicePrincipal.id } | Select-Object -ExpandProperty oauth2PermissionGrants
+        foreach ($grant in $grants) {
+            $rk = "OAuth2PermissionGrants-$($grant.id)"
+            $properties = @{
+                ConsentType = $grant.consentType
+                ConsentId   = $grant.id
+                PrincipalId = IfNull $grant.principalId
+                ResourceId  = $grant.resourceId
+                Scopes      = $grant.scope
+                GrantedBy   = If ($grant.consentType -eq 'AllPrincipals') { 'Admin' } else { 'User' }
+            }
+            $params = @{
+                Table        = $table
+                PartitionKey = $pk
+                RowKey       = $rk
+                Property     = $properties
+            }
+            Add-AzTableRow @params | Out-Null
+        }
     }
 }
 
@@ -304,7 +335,7 @@ function Set-ApplicationsInStorage {
                 ObjectId         = $application.id
                 ApplicationId    = $application.appId
                 KeyId            = $key.keyId
-                Name             = IfNull $key.displayName
+                Name             = IfNull $key.displayName "Unnamed certificate"
                 EndDateTime      = IfNull $key.endDateTime (Get-Date "2099-12-31")
                 ServicePrincipal = $false
             }
@@ -337,10 +368,10 @@ function Set-ApplicationsInStorage {
             Add-AzTableRow @params | Out-Null
         }
 
-        Write-Verbose "Application $($servicePrincipal.appId) roles"
+        Write-Verbose "Application $($application.appId) roles"
         foreach ($role in $application.appRoles) {
             $rk = "Role-$($role.id)"
-            Write-Verbose $rk
+            # Write-Verbose $rk
             $properties = @{
                 ApplicationId = $application.appId
                 DisplayName   = $role.displayName
@@ -600,6 +631,28 @@ function Get-ServicePrincipals {
     return $servicePrincipals
 }
 
+function Get-ServicePrincipalsGrants {
+    param($ServicePrincipals)
+
+    $results = @()
+    foreach ($servicePrincipal in $ServicePrincipals) {
+        # oauth2PermissionGrants
+        # Delegated permission grants authorizing this service principal to access an API on behalf of a signed-in user
+        # -> Permissions
+        # Admin -> consentType=AllPrincipals
+        # User -> consentType=Principal
+        $path = "/servicePrincipals/$($servicePrincipal.id)/oauth2PermissionGrants"
+        $grants = Invoke-Graph -Path $path
+        if ($grants.value) {
+            $results += @{
+                id                     = $servicePrincipal.id
+                oauth2PermissionGrants = $grants.value
+            }
+        }
+    }
+    Write-Verbose "Got $($results.Count) service principals oauth2 permission grants"
+    return $results
+}
 
 function Get-ServicePrincipalsAppRolesAssignments {
     param()
@@ -612,20 +665,31 @@ function Get-ServicePrincipalsAppRolesAssignments {
     return $appRoleAssignments
 }
 
+$script:CachedToken = $null
+$script:TokenExpiry = [datetime]::MinValue
+
 function Get-GraphToken {
     param()
-    # Connect using AppReg credentials from Azure Automation
-    if ($env:GraphAccessToken) {
-        Write-Verbose 'Returning cached access token'
-    } else {
-        Write-Verbose "Getting new access token"
-        $creds = Get-AutomationPSCredential -Name 'AppReg'
-        $context = (Connect-AzAccount -Tenant $TenantId -Credential $creds -ServicePrincipal -Environment AzureCloud).Context
-        $token = Get-AzAccessToken -ResourceUrl 'https://graph.microsoft.com' -DefaultProfile $context -AsSecureString
-        $plainToken = ConvertFrom-SecureString -SecureString $token.Token -AsPlainText
-        $env:GraphAccessToken = $plainToken
+
+    if ($script:CachedToken -and [datetime]::UtcNow -lt $script:TokenExpiry.AddMinutes(-5)) {
+        return $script:CachedToken
     }
-    return $env:GraphAccessToken
+    # Connect using AppReg credentials from Azure Automation
+    Write-Verbose "Getting new access token"
+
+    $creds = Get-AutomationPSCredential -Name 'AppReg'
+    $params = @{
+        TenantId         = $TenantId
+        Credential       = $creds
+        ServicePrincipal = $true
+        Environment      = 'AzureCloud'
+    }
+    $context = (Connect-AzAccount @params).Context
+    $token = Get-AzAccessToken -ResourceUrl 'https://graph.microsoft.com' -DefaultProfile $context -AsSecureString
+    $plainToken = ConvertFrom-SecureString -SecureString $token.Token -AsPlainText
+    $script:CachedToken = $plainToken
+    $script:TokenExpiry = $token.ExpiresOn.DateTime
+    return $script:CachedToken
 }
 
 function Invoke-PaginatedGraphList {
@@ -643,21 +707,34 @@ function Invoke-PaginatedGraphList {
             $fullReponse += $response.value
         }
         $nextLink = $response.'@odata.nextLink'
-        Write-Verbose "next link: $nextLink"
     } while ($nextLink)
     return $fullReponse
 }
 
 function Invoke-GraphInternal {
     param (
-        $Path,
-        $Body,
-        $Method
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $false)]
+        $Body = $null,
+
+        [Parameter(Mandatory = $false)]
+        [string]$Method = 'Get',
+
+        [Parameter(Mandatory = $false)]
+        [string]$ApiVersion = 'v1.0'
     )
-    $url = "https://graph.microsoft.com/v1.0$Path"
+
     if ($Path.StartsWith('https://')) {
         $url = $Path
+    } else {
+        if (-not $Path.StartsWith('/')) {
+            $Path = '/' + $Path
+        }
+        $url = "https://graph.microsoft.com/$($ApiVersion)$($Path)"
     }
+
     $headers = @{
         "Authorization"    = "Bearer $(Get-GraphToken)"
         'Content-Type'     = 'application/json;odata.metadata=none'
@@ -666,38 +743,65 @@ function Invoke-GraphInternal {
     }
     $ProgressPreference = 'silentlyContinue'
     $VerbosePreference = 'silentlyContinue'
-    $response = Invoke-WebRequest -Uri $url -Headers $headers -Method $Method -Body $Body -UseBasicParsing
-    $converted = $response | ConvertFrom-Json
-    return $converted
+    $params = @{
+        Uri     = $url
+        Body    = $Body
+        Headers = $headers
+        Method  = $Method
+    }
+    $response = Invoke-RestMethod @params
+    return $response
 }
 
 function Invoke-Graph {
+    <#
+    .SYNOPSIS
+    Call the Microsoft Graph API with the specified path, body, and method. Handles authentication and throttling retries.
+    Returns a PSObject from ConvertFrom-Json
+    #>
+    [CmdletBinding()]
     param (
-        $Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $false)]
         $Body = $null,
-        $Method = 'Get'
+
+        [Parameter(Mandatory = $false)]
+        [string]$Method = 'Get'
     )
-    Write-Verbose "New request: $Path"
-    try {
-        $response = Invoke-GraphInternal -Path $Path -Body $Body -Method $Method
-    } catch {
-        $response = $_.Exception.Response
-        if ($response.StatusCode -eq 429) {
-            # https://docs.microsoft.com/en-us/graph/throttling
-            # Request type	Per app across all tenants
-            # Any	        2000 requests per second
-            $seconds = [int]$response.Headers["Retry-After"]
-            if ($seconds -eq 0) {
-                $seconds = 60
+
+    $attempts = 0
+    $maxAttempts = 3
+
+    do {
+        try {
+            return Invoke-GraphInternal -Path $Path -Body $Body -Method $Method
+        } catch {
+            if ($_.Exception.Response.StatusCode -in 429, 503) {
+                # https://docs.microsoft.com/en-us/graph/throttling
+                # Request type	Per app across all tenants
+                # Any	        2000 requests per second
+                $seconds = [int]$_.Exception.Response.Headers["Retry-After"]
+                if (-not $seconds) {
+                    $seconds = 60
+                }
+                $seconds = $seconds + [Math]::Pow(2, $attempts)  # Exponential backoff
+                Write-Warning "GraphHelper: Throttling error. Retrying in $($seconds)s"
+                Start-Sleep ($seconds)
+            } else {
+                $msg = $_.Exception.Message
+                try {
+                    $json = $_.ToString() | ConvertFrom-Json
+                    $code = $json.error.code
+                    $msg = $json.error.message
+                    $rid = $json.error.innerError."request-id"
+                } catch {}
+                throw "Error invoking Graph ($($_.Exception.Response.StatusCode)-$code) ($rid): $msg"
             }
-            Write-Warning "Throttling error. Retry-After= $($seconds) s"
-            Start-Sleep ($seconds + 5)
-            $response = Invoke-GraphInternal -Path $Path -Body $Body -Method $Method
         }
-        Write-Error "Error invoking Graph ($_): $($response.StatusCode)"
-        exit
-    }
-    return $response
+    } while ($attempts++ -lt $maxAttempts)
+    throw "Failed to invoke Graph after $maxAttempts attempts."
 }
 
 Start-Work
