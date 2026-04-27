@@ -34,10 +34,10 @@ function Start-Work {
 
     # App Registrations
     $apps = Get-AppRegistrations
-    Set-ApplicationsInStorage -Applications $apps -StorageTable $table
-
+    
     $table = Get-StorageTable -AzureContext $azureContext -TableName "Applications"
     Clear-Table $table
+    Set-ApplicationsInStorage -Applications $apps -StorageTable $table
 
     # Service Principals
     $servicePrincipals = Get-ServicePrincipals
@@ -86,6 +86,7 @@ function Set-ServicePrincipalsInStorage {
     $pTable = $PrincipalsTable.CloudTable
 
     Write-Verbose "Saving the service principals in storage"
+    $resolvedEmails = @()
     foreach ($servicePrincipal in $ServicePrincipals) {
         Write-Verbose "ServiceApplication $($servicePrincipal.appId)"
         $pk = $servicePrincipal.AppId
@@ -93,7 +94,7 @@ function Set-ServicePrincipalsInStorage {
         $notifyUsers = ''
         if ($servicePrincipal.notes) {
             $notifyUsersList = @()
-            Write-Verbose $servicePrincipal.notes
+            # Write-Verbose $servicePrincipal.notes
             $servicePrincipal.notes.Split("`n") | ForEach-Object {
                 if ($_ -match $ownerRE) {
                     Write-Verbose "Found match: $($Matches[2])"
@@ -102,6 +103,33 @@ function Set-ServicePrincipalsInStorage {
             }
             if ($notifyUsersList.Count -gt 0) {
                 $notifyUsers = [String]::Join(',', $notifyUsersList)
+            }
+            foreach($user in $notifyUsersList) {
+                if ($user -in $resolvedEmails) {
+                    Write-Verbose "Already resolved user with email: $user"
+                    continue
+                }
+                $userDetails = Get-UserDetailsWithEmail -Email $user
+                if ($userDetails) {
+                    Write-Verbose "Storing principal $($userDetails.userPrincipalName)"
+                    $properties = @{
+                        UPN         = $userDetails.userPrincipalName
+                        DisplayName = IfNull $userDetails.displayName $userDetails.userPrincipalName
+                        Mail        = IfNull $userDetails.mail
+                        State       = IfNull $userDetails.state
+                    }
+                    $rk = $user
+                    $params = @{
+                        Table        = $pTable
+                        PartitionKey = "NotifyUsers"
+                        RowKey       = $rk
+                        Property     = $properties
+                    }
+                    Add-AzTableRow @params | Out-Null
+                    $resolvedEmails += $user
+                } else {
+                    Write-Warning "No details found for user with email: $user"
+                }
             }
         }
         $replyUrls = ''
@@ -292,6 +320,7 @@ function Set-ServicePrincipalsInStorage {
             Add-AzTableRow @params | Out-Null
 
             if ($grant.principal) {
+                Write-Verbose "Storing principal $($grant.principalId)"
                 $properties = @{
                     UPN         = $grant.principal.userPrincipalName
                     DisplayName = IfNull $grant.principal.displayName $grant.principal.userPrincipalName
@@ -692,13 +721,6 @@ function Get-ServicePrincipalsGrants {
     return $results
 }
 
-function Get-UserDetails {
-    param($UserId)
-    $path = "/users/$($UserId)?`$select=displayName,userPrincipalName,mail,state"
-    $details = Invoke-Graph -Path $path
-    return $details
-}
-
 function Get-ServicePrincipalsAppRolesAssignments {
     param()
     # appRoleAssignments
@@ -708,6 +730,23 @@ function Get-ServicePrincipalsAppRolesAssignments {
     $appRoleAssignments = Invoke-PaginatedGraphList -Path $path
     Write-Verbose "Got $($appRoleAssignments.Count) service principals app role assignments"
     return $appRoleAssignments
+}
+
+function Get-UserDetails {
+    param($UserId)
+    $path = "/users/$($UserId)?`$select=displayName,userPrincipalName,mail,state"
+    $details = Invoke-Graph -Path $path
+    return $details
+}
+
+function Get-UserDetailsWithEmail {
+    param($Email)
+    $path = "/users?`$filter=mail eq '$Email'&`$select=displayName,userPrincipalName,mail,state"
+    $response = Invoke-Graph -Path $path
+    if ($response.value.Count -gt 0) {
+        return $response.value[0]
+    }
+    return $null
 }
 
 $script:CachedToken = $null
