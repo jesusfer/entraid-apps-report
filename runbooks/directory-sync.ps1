@@ -24,7 +24,7 @@ $VerbosePreference = $PreviousVerbosePreference
 # $VerbosePreference = 'Continue'
 # $ErrorActionPreference = 'Stop'
 
-$ownerRE = '(owner|propietario)[=:]([\w@.-_]+)'
+$ownerRE = '(owner|propietario)=(([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,},?)+)'
 
 # Main orchestration function
 function Start-Work {
@@ -97,14 +97,20 @@ function Set-ServicePrincipalsInStorage {
             # Write-Verbose $servicePrincipal.notes
             $servicePrincipal.notes.Split("`n") | ForEach-Object {
                 if ($_ -match $ownerRE) {
+                    # $Matches[2] is the list of emails separated by comma in the RE
                     Write-Verbose "Found match: $($Matches[2])"
-                    $notifyUsersList += $Matches[2]
+                    foreach ($email in $Matches[2].Split(',')) {
+                        $trimmedEmail = $email.Trim()
+                        if ($trimmedEmail -ne '') {
+                            $notifyUsersList += $trimmedEmail
+                        }
+                    }
                 }
             }
             if ($notifyUsersList.Count -gt 0) {
                 $notifyUsers = [String]::Join(',', $notifyUsersList)
             }
-            foreach($user in $notifyUsersList) {
+            foreach ($user in $notifyUsersList) {
                 if ($user -in $resolvedEmails) {
                     Write-Verbose "Already resolved user with email: $user"
                     continue
