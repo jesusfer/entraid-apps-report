@@ -168,7 +168,13 @@ function Add-TableRow {
         Add-AzTableRow -Table $Table -PartitionKey $PartitionKey -RowKey $RowKey -Property $Property | Out-Null
     }
     catch {
-        Write-Error "Failed to add row with PartitionKey '$PartitionKey' and RowKey '$RowKey': $($_.Exception.Message)"
+        $messages = @()
+        $ex = $_.Exception
+        while ($null -ne $ex) {
+            $messages += $ex.Message
+            $ex = $ex.InnerException
+        }
+        Write-Error "Failed to add row with PartitionKey '$PartitionKey' and RowKey '$RowKey': $([String]::Join(' --> ', $messages))"
     }
 }
 
