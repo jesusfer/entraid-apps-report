@@ -2,7 +2,8 @@
 param
 (
     # UA or SA, User-Assigned or System Assigned
-    [string]$ManagedIdentityMethod = "SA"
+    [string]$ManagedIdentityMethod = "SA",
+    [int]$NotifyUsersResolveBatchSize = 15
 )
 
 $TenantId = Get-AutomationVariable -Name 'TenantId'
@@ -32,33 +33,116 @@ function Start-Work {
     # Store data in Azure Storage Account
     $azureContext = Connect-ManagedIdentity
 
-    # App Registrations
-    $apps = Get-AppRegistrations
-    
-    $table = Get-StorageTable -AzureContext $azureContext -TableName "Applications"
-    Clear-Table $table
-    Set-ApplicationsInStorage -Applications $apps -StorageTable $table
+    #####################
+    # App Registrations #
+    #####################
 
-    # Service Principals
+    $table = Get-StorageTable -AzureContext $azureContext -TableName "Applications"
+    $apps = Get-AppRegistrations
+    Write-Output "Found $($apps.Count) Applications"    
+    Write-Warning "Mem checkpoint: $((Get-MemoryUsageMB).WorkingSetMB) MB"
+    Clear-Table $table
+    Write-Output "Saving Applications"
+    Save-Applications -Applications $apps -StorageTable $table
+
+    ######################
+    # Service Principals #
+    ######################
+
+    # List of service principals
+    # One paginated Graph request to get everything
     $servicePrincipals = Get-ServicePrincipals
-    $servicePrincipalsGrants = Get-ServicePrincipalsGrants -ServicePrincipals $servicePrincipals
-    $servicePrincipalsAppRoleAssignments = Get-ServicePrincipalsAppRolesAssignments
+    Write-Output "Found $($servicePrincipals.Count) Service Principals"
+    Write-Warning "Mem checkpoint: $((Get-MemoryUsageMB).WorkingSetMB) MB"
 
     $spTable = Get-StorageTable -AzureContext $azureContext -TableName "ServicePrincipals"
     Clear-Table $spTable
+
+    Write-Output "Saving ServicePrincipals"
+    $params = @{
+        ServicePrincipals = $servicePrincipals
+        StorageTable      = $spTable
+    }
+    $notifyUsersToResolve = Save-ServicePrincipals @params
+
+    # Map each service principal object id to its appId, used as the storage partition key
+    $appIdById = @{}
+    foreach ($servicePrincipal in $servicePrincipals) {
+        $appIdById[$servicePrincipal.id] = $servicePrincipal.appId
+    }
+
+    # List of service principals IDs with their appRoleAssignments
+    # One paginated Graph request to get everything
+    $servicePrincipalsAppRoleAssignments = Get-SPAppRolesAssignments
+    Write-Output "Found $($servicePrincipalsAppRoleAssignments.Count) Service Principal App Role Assignments"
+    Write-Warning "Mem checkpoint: $((Get-MemoryUsageMB).WorkingSetMB) MB"
+
+    # Store the app role assignments consumed by all service principals
+    Write-Output "Saving SPAppRoleAssignments"
+    $params = @{
+        AppIdById          = $appIdById
+        AppRoleAssignments = $servicePrincipalsAppRoleAssignments
+        StorageTable       = $spTable
+    }
+    Save-SPAppRoleAssignments @params
+
+    # Hashtable with key=servicePrincipalId, value=grants
+    # One request per service principal
+    # User reference using the principalId
+    $servicePrincipalsGrants = Get-SPOAuth2Grants -ServicePrincipals $servicePrincipals
+    Write-Output "Found $($servicePrincipalsGrants.Count) Service Principal Grants"
+    Write-Warning "Mem checkpoint: $((Get-MemoryUsageMB).WorkingSetMB) MB"
+
+    # Store the oauth2 permission grants of all service principals
+    Write-Output "Saving SPGrants"
+    $params = @{
+        AppIdById    = $appIdById
+        AllGrants    = $servicePrincipalsGrants
+        StorageTable = $spTable
+    }
+    Save-SPGrants @params
+
+    # Hashtable with key=principalId, value=principal
+    # Resolve the unique principals referenced in the grants
+    # One Graph request per unique principal
+    # Potentially the largest amount of requests
+    $grantsPrincipals = Get-SPGrantsPrincipals -Grants $servicePrincipalsGrants
+    Write-Output "Found $($grantsPrincipals.Count) Grant Principals"
+    Write-Warning "Mem checkpoint: $((Get-MemoryUsageMB).WorkingSetMB) MB"
+
     $principalsTable = Get-StorageTable -AzureContext $azureContext -TableName "Principals"
     Clear-Table $principalsTable
+
+    # Store the unique principals referenced by the grants
+    Write-Output "Saving SPGrantsPrincipals"
     $params = @{
-        ServicePrincipals  = $servicePrincipals
-        AppRoleAssignments = $servicePrincipalsAppRoleAssignments
-        AllGrants          = $servicePrincipalsGrants
-        StorageTable       = $spTable
-        PrincipalsTable    = $principalsTable
+        GrantsPrincipals = $grantsPrincipals
+        PrincipalsTable  = $principalsTable
     }
-    Set-ServicePrincipalsInStorage @params
+    Save-SPGrantPrincipals @params
+
+    # Store the notification users, searching for their details in Graph
+    # Number of Graph requests is roughly the number of notification users / batchSize
+    Write-Output "Saving SPNotificationUsers"
+    $params = @{
+        NotifyUsers     = $notifyUsersToResolve
+        PrincipalsTable = $principalsTable
+        BatchSize       = $NotifyUsersResolveBatchSize
+    }
+    Save-SPNotificationUsers @params
 }
 
 # Helper functions
+
+function Get-MemoryUsageMB {
+    $proc = [System.Diagnostics.Process]::GetCurrentProcess()
+    $proc.Refresh()
+    [PSCustomObject]@{
+        WorkingSetMB  = [math]::Round($proc.WorkingSet64 / 1MB, 1)
+        PrivateMB     = [math]::Round($proc.PrivateMemorySize64 / 1MB, 1)
+        GCHeapMB      = [math]::Round([GC]::GetTotalMemory($false) / 1MB, 1)
+    }
+}
 
 function IfNull {
     [CmdletBinding()]
@@ -73,24 +157,36 @@ function IfNull {
     }
 }
 
+function Add-TableRow {
+    param(
+        $Table,
+        $PartitionKey,
+        $RowKey,
+        $Property
+    )
+    try {
+        Add-AzTableRow -Table $Table -PartitionKey $PartitionKey -RowKey $RowKey -Property $Property | Out-Null
+    }
+    catch {
+        Write-Error "Failed to add row with PartitionKey '$PartitionKey' and RowKey '$RowKey': $($_.Exception.Message)"
+    }
+}
+
 # https://learn.microsoft.com/en-us/graph/api/resources/serviceprincipal
-function Set-ServicePrincipalsInStorage {
+function Save-ServicePrincipals {
     param(
         $ServicePrincipals,
-        $AppRoleAssignments,
-        $AllGrants,
-        $StorageTable,
-        $PrincipalsTable
+        $StorageTable
     )
     $table = $StorageTable.CloudTable
-    $pTable = $PrincipalsTable.CloudTable
 
     Write-Verbose "Saving the service principals in storage"
-    $resolvedEmails = @()
+    $notifyUsersToResolve = @()
     foreach ($servicePrincipal in $ServicePrincipals) {
         Write-Verbose "ServiceApplication $($servicePrincipal.appId)"
         $pk = $servicePrincipal.AppId
 
+        # Process notification users
         $notifyUsers = ''
         if ($servicePrincipal.notes) {
             $notifyUsersList = @()
@@ -109,43 +205,20 @@ function Set-ServicePrincipalsInStorage {
             }
             if ($notifyUsersList.Count -gt 0) {
                 $notifyUsers = [String]::Join(',', $notifyUsersList)
-            }
-            foreach ($user in $notifyUsersList) {
-                if ($user -in $resolvedEmails) {
-                    Write-Verbose "Already resolved user with email: $user"
-                    continue
-                }
-                $userDetails = Get-UserDetailsWithEmail -Email $user
-                if ($userDetails) {
-                    Write-Verbose "Storing principal $($userDetails.userPrincipalName)"
-                    $properties = @{
-                        UPN         = $userDetails.userPrincipalName
-                        DisplayName = IfNull $userDetails.displayName $userDetails.userPrincipalName
-                        Mail        = IfNull $userDetails.mail
-                        State       = IfNull $userDetails.state
-                    }
-                    $rk = $user
-                    $params = @{
-                        Table        = $pTable
-                        PartitionKey = "NotifyUsers"
-                        RowKey       = $rk
-                        Property     = $properties
-                    }
-                    Add-AzTableRow @params | Out-Null
-                    $resolvedEmails += $user
-                } else {
-                    Write-Warning "No details found for user with email: $user"
-                }
+                $notifyUsersToResolve += $notifyUsersList
             }
         }
+
         $replyUrls = ''
         if ($servicePrincipal.ReplyUrls.Count -gt 0) {
             $replyUrls = [String]::Join(',', $servicePrincipal.ReplyUrls)
         }
+
         $servicePrincipalNames = ''
         if ($servicePrincipal.ServicePrincipalNames.Count -gt 0) {
             $servicePrincipalNames = [String]::Join(',', $servicePrincipal.servicePrincipalNames)
         }
+
         $rk = "ServicePrincipal"
         $properties = @{
             AccountEnabled            = $servicePrincipal.accountEnabled
@@ -167,7 +240,7 @@ function Set-ServicePrincipalsInStorage {
             RowKey       = $rk
             Property     = $properties
         }
-        Add-AzTableRow @params | Out-Null
+        Add-TableRow @params
 
         Write-Verbose "ServiceApplication $($servicePrincipal.appId) scopes"
         foreach ($scope in $servicePrincipal.oauth2PermissionScopes) {
@@ -186,7 +259,7 @@ function Set-ServicePrincipalsInStorage {
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
         }
 
         Write-Verbose "ServiceApplication $($servicePrincipal.appId) roles"
@@ -206,7 +279,7 @@ function Set-ServicePrincipalsInStorage {
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
         }
 
         Write-Verbose "ServiceApplication $($servicePrincipal.appId) keyCredentials"
@@ -230,7 +303,7 @@ function Set-ServicePrincipalsInStorage {
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
         }
 
         Write-Verbose "ServiceApplication $($servicePrincipal.AppId) passwordCredentials"
@@ -249,7 +322,7 @@ function Set-ServicePrincipalsInStorage {
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
         }
 
         <#
@@ -279,36 +352,55 @@ function Set-ServicePrincipalsInStorage {
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
         }
+    }
 
-        # Este listado son los roles que este service principal consume de otros SPs y para los que tiene admin grant
-        Write-Verbose "ServiceApplication $($servicePrincipal.appId) appRoleAssignments"
-        $roleAssignments = $AppRoleAssignments | Where-Object { $_.id -eq $servicePrincipal.id } | Select-Object -ExpandProperty appRoleAssignments
-        foreach ($assignment in $roleAssignments) {
-            $rk = "AppRolesAssignment-$($assignment.id)"
-            $properties = @{
-                ApplicationId       = $servicePrincipal.appId
-                AssignmentId        = $assignment.id
-                AppRoleId           = $assignment.appRoleId
-                CreatedDateTime     = IfNull $assignment.createdDateTime
-                ResourceDisplayName = $assignment.resourceDisplayName
-                # Object Id of the service principal that exposes the role
-                ResourceId          = $assignment.resourceId
-            }
-            $params = @{
-                Table        = $table
-                PartitionKey = $pk
-                RowKey       = $rk
-                Property     = $properties
-            }
-            Add-AzTableRow @params | Out-Null
+    return $notifyUsersToResolve
+}
+
+function Save-SPGrantPrincipals {
+    param(
+        $GrantsPrincipals,
+        $PrincipalsTable
+    )
+    $pTable = $PrincipalsTable.CloudTable
+
+    # Store the unique principals referenced by the grants
+    Write-Verbose "Saving the grant principals in storage"
+    foreach ($principalId in $GrantsPrincipals.Keys) {
+        $principal = $GrantsPrincipals[$principalId]
+        Write-Verbose "Storing principal $principalId"
+        $properties = @{
+            UPN         = $principal.userPrincipalName
+            DisplayName = IfNull $principal.displayName $principal.userPrincipalName
+            Mail        = IfNull $principal.mail
+            State       = IfNull $principal.state
         }
+        $params = @{
+            Table        = $pTable
+            PartitionKey = "Users"
+            RowKey       = $principalId
+            Property     = $properties
+        }
+        Add-TableRow @params
+    }
+}
 
+function Save-SPGrants {
+    param(
+        $AppIdById,
+        $AllGrants,
+        $StorageTable
+    )
+    $table = $StorageTable.CloudTable
+
+    Write-Verbose "Saving the service principals oauth2 permission grants in storage"
+    foreach ($servicePrincipalId in $AllGrants.Keys) {
         # Listado de permisos delegados que este service principal tiene concedidos por admin consent
-        Write-Verbose "ServiceApplication $($servicePrincipal.appId) oauth2PermissionGrants"
-        $grants = $AllGrants | Where-Object { $_.id -eq $servicePrincipal.id } | Select-Object -ExpandProperty oauth2PermissionGrants
-        foreach ($grant in $grants) {
+        $appId = $appIdById[$servicePrincipalId]
+        Write-Verbose "ServiceApplication $appId oauth2PermissionGrants"
+        foreach ($grant in $AllGrants[$servicePrincipalId]) {
             $rk = "OAuth2PermissionGrants-$($grant.id)"
             $properties = @{
                 ConsentType = $grant.consentType
@@ -319,35 +411,125 @@ function Set-ServicePrincipalsInStorage {
             }
             $params = @{
                 Table        = $table
-                PartitionKey = $pk
+                PartitionKey = $appId
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
+        }
+    }
+}
 
-            if ($grant.principal) {
-                Write-Verbose "Storing principal $($grant.principalId)"
-                $properties = @{
-                    UPN         = $grant.principal.userPrincipalName
-                    DisplayName = IfNull $grant.principal.displayName $grant.principal.userPrincipalName
-                    Mail        = IfNull $grant.principal.mail
-                    State       = IfNull $grant.principal.state
-                }
-                $rk = $grant.principalId
-                $params = @{
-                    Table        = $pTable
-                    PartitionKey = "Users"
-                    RowKey       = $rk
-                    Property     = $properties
-                }
-                Add-AzTableRow @params | Out-Null
+function Save-SPAppRoleAssignments {
+    param(
+        $AppIdById,
+        $AppRoleAssignments,
+        $StorageTable
+    )
+    $table = $StorageTable.CloudTable
+
+    Write-Verbose "Saving the service principals app role assignments in storage"
+    foreach ($servicePrincipalAssignments in $AppRoleAssignments) {
+        # Roles that this service principal consumes from other SPs and for which it has admin grant
+        $appId = $appIdById[$servicePrincipalAssignments.id]
+        Write-Verbose "ServiceApplication $appId appRoleAssignments"
+        foreach ($assignment in $servicePrincipalAssignments.appRoleAssignments) {
+            $rk = "AppRolesAssignment-$($assignment.id)"
+            $properties = @{
+                ApplicationId       = $appId
+                AssignmentId        = $assignment.id
+                AppRoleId           = $assignment.appRoleId
+                CreatedDateTime     = IfNull $assignment.createdDateTime
+                ResourceDisplayName = $assignment.resourceDisplayName
+                # Object Id of the service principal that exposes the role
+                ResourceId          = $assignment.resourceId
             }
+            $params = @{
+                Table        = $table
+                PartitionKey = $appId
+                RowKey       = $rk
+                Property     = $properties
+            }
+            Add-TableRow @params
+        }
+    }
+}
+
+function Save-SPNotificationUsers {
+    param(
+        $NotifyUsers,
+        $PrincipalsTable,
+        [int]$BatchSize = 15
+    )
+
+    if (-not $NotifyUsers -or $NotifyUsers.Count -eq 0) {
+        Write-Output "No notify users to resolve"
+        return
+    }
+
+    $pTable = $PrincipalsTable.CloudTable
+
+    $uniqueNotifyUsers = @{}
+    foreach ($user in $NotifyUsers) {
+        if ($null -eq $user) {
+            continue
+        }
+        $trimmedUser = $user.Trim()
+        if ($trimmedUser -eq '') {
+            continue
+        }
+        $normalizedUser = $trimmedUser.ToLowerInvariant()
+        if (-not $uniqueNotifyUsers.ContainsKey($normalizedUser)) {
+            $uniqueNotifyUsers[$normalizedUser] = $trimmedUser
+        }
+    }
+
+    if ($uniqueNotifyUsers.Count -eq 0) {
+        Write-Output "No valid notify users to resolve"
+        return
+    }
+
+    Write-Verbose "Resolving $($uniqueNotifyUsers.Count) notify users in batches of $BatchSize"
+    $resolvedUsers = Get-UsersWithEmailOrUPN -EmailOrUPNList $uniqueNotifyUsers.Keys -BatchSize $BatchSize
+
+    $resolvedUsersByKey = @{}
+    foreach ($userDetails in $resolvedUsers) {
+        if ($userDetails.mail) {
+            $resolvedUsersByKey[$userDetails.mail.ToLowerInvariant()] = $userDetails
+        }
+        if ($userDetails.userPrincipalName) {
+            $resolvedUsersByKey[$userDetails.userPrincipalName.ToLowerInvariant()] = $userDetails
+        }
+    }
+
+    foreach ($userKey in $uniqueNotifyUsers.Keys) {
+        $rawUser = $uniqueNotifyUsers[$userKey]
+        if ($resolvedUsersByKey.ContainsKey($userKey)) {
+            $userDetails = $resolvedUsersByKey[$userKey]
+            Write-Verbose "Storing principal $($userDetails.userPrincipalName)"
+            $properties = @{
+                UPN         = $userDetails.userPrincipalName
+                DisplayName = IfNull $userDetails.displayName $userDetails.userPrincipalName
+                Mail        = IfNull $userDetails.mail
+                State       = IfNull $userDetails.state
+            }
+            $rk = $rawUser
+            $params = @{
+                Table        = $pTable
+                PartitionKey = "NotifyUsers"
+                RowKey       = $rk
+                Property     = $properties
+            }
+            Add-TableRow @params
+        }
+        else {
+            Write-Warning "User not found in Entra with email or UPN: $rawUser"
         }
     }
 }
 
 # https://learn.microsoft.com/en-us/graph/api/resources/application
-function Set-ApplicationsInStorage {
+function Save-Applications {
     param(
         $Applications,
         $StorageTable
@@ -381,7 +563,7 @@ function Set-ApplicationsInStorage {
             RowKey       = $rk
             Property     = $properties
         }
-        Add-AzTableRow @params | Out-Null
+        Add-TableRow @params
 
         # keyCredentials
         Write-Verbose "Application $($application.AppId) keyCredentials"
@@ -401,7 +583,7 @@ function Set-ApplicationsInStorage {
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
         }
 
         # passwordCredentials
@@ -421,7 +603,7 @@ function Set-ApplicationsInStorage {
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
         }
 
         Write-Verbose "Application $($application.appId) roles"
@@ -441,7 +623,7 @@ function Set-ApplicationsInStorage {
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
         }
 
         Write-Verbose "Application $($application.AppId) owners"
@@ -462,7 +644,7 @@ function Set-ApplicationsInStorage {
                 RowKey       = $rk
                 Property     = $properties
             }
-            Add-AzTableRow @params | Out-Null
+            Add-TableRow @params
         }
 
         # requiredResourceAccess
@@ -483,7 +665,7 @@ function Set-ApplicationsInStorage {
                     RowKey       = $rk
                     Property     = $properties
                 }
-                Add-AzTableRow @params | Out-Null
+                Add-TableRow @params
             }
         }
 
@@ -506,6 +688,8 @@ function Set-ApplicationsInStorage {
         #>
     }
 }
+
+# Storage functions
 
 function Get-StorageTable {
     param (
@@ -537,6 +721,8 @@ function Clear-Table {
     Get-AzTableRow -Table $table.CloudTable | Remove-AzTableRow -Table $table.CloudTable | Out-Null
 }
 
+# Authentication functions
+
 function Connect-ManagedIdentity {
     param()
     Write-Verbose "Auth method: $($ManagedIdentityMethod)"
@@ -548,7 +734,8 @@ function Connect-ManagedIdentity {
                 $azureContext = Set-AzContext -SubscriptionName $Subscription -DefaultProfile $azureContext
                 Write-Verbose "Logged in with managed identity"
                 return $azureContext
-            } catch {
+            }
+            catch {
                 Write-Error "Error using system-assigned identity: $($_)"
                 exit
             }
@@ -561,7 +748,8 @@ function Connect-ManagedIdentity {
                 $azureContext = Set-AzContext -SubscriptionName $Subscription -DefaultProfile $azureContext
                 Write-Verbose "Logged in with user assigned identity"
                 return $azureContext
-            } catch {
+            }
+            catch {
                 Write-Error "Error using user assigned identity: $($_)"
                 exit
             }
@@ -572,6 +760,8 @@ function Connect-ManagedIdentity {
         }
     }
 }
+
+# Graph retrieval functions
 
 function Get-AppRegistrations {
     param()
@@ -625,7 +815,6 @@ function Get-AppRegistrations {
     # Directory objects that are owners of this application
     $path = "/applications?`$select=$props&`$expand=owners(`$select=id,displayName,userPrincipalName,mail,state)"
     $applications = Invoke-PaginatedGraphList -Path $path
-    Write-Verbose "Got $($applications.Count) apps"
     return $applications
 }
 
@@ -679,62 +868,60 @@ function Get-ServicePrincipals {
         #>
         "signInAudience"
     ) -join ','
-    # appRoleAssignedTo
+    # Gets all service principals and their appRoleAssignedTo
     # App role assignments for this app or service, granted to users, groups, and other service principals.
     # -> Users and groups
     $path = "/servicePrincipals?`$select=$props&`$expand=appRoleAssignedTo"
     $servicePrincipals = Invoke-PaginatedGraphList -Path $path
-    Write-Verbose "Got $($servicePrincipals.Count) service principals"
     return $servicePrincipals
 }
 
-function Get-ServicePrincipalsGrants {
+function Get-SPOAuth2Grants {
     param($ServicePrincipals)
-
-    $results = @()
-    $resolvedPrincipals = @()
+    # oauth2PermissionGrants
+    # Delegated permission grants authorizing this service principal to access an API on behalf of a signed-in user
+    # -> Permissions
+    # Admin -> consentType=AllPrincipals
+    # User -> consentType=Principal
+    $results = @{}
     foreach ($servicePrincipal in $ServicePrincipals) {
-        # oauth2PermissionGrants
-        # Delegated permission grants authorizing this service principal to access an API on behalf of a signed-in user
-        # -> Permissions
-        # Admin -> consentType=AllPrincipals
-        # User -> consentType=Principal
         $path = "/servicePrincipals/$($servicePrincipal.id)/oauth2PermissionGrants"
         $grants = Invoke-Graph -Path $path
         if ($grants.value) {
-            $updatedGrants = @()
-            foreach ($grant in $grants.value) {
-                if ($grant.principalId -and $grant.principalId -notin $resolvedPrincipals) {
-                    $userDetails = Get-UserDetails -UserId $grant.principalId
-                    $grantDict = @{}
-                    foreach ($prop in $grant.PSObject.Properties) {
-                        $grantDict[$prop.Name] = $prop.Value
-                    }
-                    $grantDict["principal"] = $userDetails
-                    $resolvedPrincipals += $grant.principalId
-                    $updatedGrants += $grantDict
-                } else {
-                    $updatedGrants += $grant
-                }
-            }
-            $results += @{
-                id                     = $servicePrincipal.id
-                oauth2PermissionGrants = $updatedGrants
-            }
+            $results[$servicePrincipal.id] = $grants.value
         }
     }
-    Write-Verbose "Got $($results.Count) service principals oauth2 permission grants"
     return $results
 }
 
-function Get-ServicePrincipalsAppRolesAssignments {
+function Get-SPGrantsPrincipals {
+    param($Grants)
+    # Extract the unique, non-null principalIds referenced by the grants and
+    # resolve each one once into a hashtable keyed by principalId.
+    $principals = @{}
+    foreach ($servicePrincipalId in $Grants.Keys) {
+        foreach ($grant in $Grants[$servicePrincipalId]) {
+            $principalId = $grant.principalId
+            if ($principalId -and -not $principals.ContainsKey($principalId)) {
+                $userDetails = Get-UserDetails -UserId $principalId
+                $principalDict = @{}
+                foreach ($prop in $userDetails.PSObject.Properties) {
+                    $principalDict[$prop.Name] = $prop.Value
+                }
+                $principals[$principalId] = $principalDict
+            }
+        }
+    }
+    return $principals
+}
+
+function Get-SPAppRolesAssignments {
     param()
     # appRoleAssignments
     # App role assignment for another app or service, granted to this service principal
     # App registration -> API Permissions -> Configured Permissions (Type Application)
     $path = "/servicePrincipals?`$select=id&`$expand=appRoleAssignments"
     $appRoleAssignments = Invoke-PaginatedGraphList -Path $path
-    Write-Verbose "Got $($appRoleAssignments.Count) service principals app role assignments"
     return $appRoleAssignments
 }
 
@@ -745,15 +932,72 @@ function Get-UserDetails {
     return $details
 }
 
-function Get-UserDetailsWithEmail {
-    param($Email)
-    $path = "/users?`$filter=mail eq '$Email'&`$select=displayName,userPrincipalName,mail,state"
-    $response = Invoke-Graph -Path $path
-    if ($response.value.Count -gt 0) {
-        return $response.value[0]
+function Get-UsersWithEmailOrUPN {
+    param(
+        [string[]]$EmailOrUPNList,
+        [int]$BatchSize = 15
+    )
+
+    # Find users by email or UPN with batched filter queries to keep request size bounded
+    $props = @(
+        "displayName",
+        "userPrincipalName",
+        "mail",
+        "state"
+    ) -join ','
+
+    if (-not $EmailOrUPNList -or $EmailOrUPNList.Count -eq 0) {
+        return @()
     }
-    return $null
+
+    if ($BatchSize -lt 1) {
+        $BatchSize = 1
+    }
+
+    $normalizedIdentifiers = @{}
+    foreach ($identifier in $EmailOrUPNList) {
+        if ($null -eq $identifier) {
+            continue
+        }
+        $trimmedIdentifier = $identifier.Trim()
+        if ($trimmedIdentifier -eq '') {
+            continue
+        }
+        $normalizedIdentifier = $trimmedIdentifier.ToLowerInvariant()
+        if (-not $normalizedIdentifiers.ContainsKey($normalizedIdentifier)) {
+            $normalizedIdentifiers[$normalizedIdentifier] = $trimmedIdentifier
+        }
+    }
+
+    $identifiers = @($normalizedIdentifiers.Values)
+    if ($identifiers.Count -eq 0) {
+        return @()
+    }
+
+    $resolvedUsers = @()
+    for ($index = 0; $index -lt $identifiers.Count; $index += $BatchSize) {
+        $endIndex = [Math]::Min($index + $BatchSize - 1, $identifiers.Count - 1)
+        $batch = @($identifiers[$index..$endIndex])
+
+        $filters = @()
+        foreach ($identifier in $batch) {
+            $escapedIdentifier = $identifier.Replace("'", "''")
+            $filters += "mail eq '$escapedIdentifier'"
+            $filters += "userPrincipalName eq '$escapedIdentifier'"
+        }
+
+        $filterClause = [String]::Join(' or ', $filters)
+        $path = "/users?`$filter=$filterClause&`$select=$props"
+        $response = Invoke-Graph -Path $path
+        if ($response.value) {
+            $resolvedUsers += $response.value
+        }
+    }
+
+    return $resolvedUsers
 }
+
+# Graph functions
 
 $script:CachedToken = $null
 $script:TokenExpiry = [datetime]::MinValue
@@ -818,7 +1062,8 @@ function Invoke-GraphInternal {
 
     if ($Path.StartsWith('https://')) {
         $url = $Path
-    } else {
+    }
+    else {
         if (-not $Path.StartsWith('/')) {
             $Path = '/' + $Path
         }
@@ -846,7 +1091,8 @@ function Invoke-GraphInternal {
 function Invoke-Graph {
     <#
     .SYNOPSIS
-    Call the Microsoft Graph API with the specified path, body, and method. Handles authentication and throttling retries.
+    Call the Microsoft Graph API with the specified path, body, and method.
+    Handles authentication and throttling retries.
     Returns a PSObject from ConvertFrom-Json
     #>
     [CmdletBinding()]
@@ -867,7 +1113,8 @@ function Invoke-Graph {
     do {
         try {
             return Invoke-GraphInternal -Path $Path -Body $Body -Method $Method
-        } catch {
+        }
+        catch {
             if ($_.Exception.Response.StatusCode -in 429, 503) {
                 # https://docs.microsoft.com/en-us/graph/throttling
                 # Request type	Per app across all tenants
@@ -879,14 +1126,16 @@ function Invoke-Graph {
                 $seconds = $seconds + [Math]::Pow(2, $attempts)  # Exponential backoff
                 Write-Warning "GraphHelper: Throttling error. Retrying in $($seconds)s"
                 Start-Sleep ($seconds)
-            } else {
+            }
+            else {
                 $msg = $_.Exception.Message
                 try {
                     $json = $_.ToString() | ConvertFrom-Json
                     $code = $json.error.code
                     $msg = $json.error.message
                     $rid = $json.error.innerError."request-id"
-                } catch {}
+                }
+                catch {}
                 throw "Error invoking Graph ($($_.Exception.Response.StatusCode)-$code) ($rid): $msg"
             }
         }
