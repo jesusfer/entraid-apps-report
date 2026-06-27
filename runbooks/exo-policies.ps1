@@ -58,7 +58,7 @@ function Start-Work () {
     foreach ($policy in $policies) {
         $groupId = $policy.ScopeIdentityRaw.split(";")[1]
         $pk = $policy.AppId
-        $rk = "Policy"
+        $rk = "AppAccessPolicy_$($policy.Guid)"
         $properties = @{
             ApplicationId = $policy.AppId
             Name          = $policy.ScopeName
