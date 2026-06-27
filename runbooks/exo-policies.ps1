@@ -82,9 +82,8 @@ function Start-Work () {
     Write-Output "Stored $($policiesCount) policies"
 
     # Store EXO management role assignments granted to service principals
-    $roleTable = Get-StorageTable -AzureContext $azureContext -TableName "ApplicationRoleAssignments"
-    Clear-Table $roleTable
-    $roleAssignmentsCount = Save-RoleAssignments -Table $roleTable
+    # in the same table as the policies, keyed by the AppId.
+    $roleAssignmentsCount = Save-RoleAssignments -Table $table
     Write-Output "Stored $($roleAssignmentsCount) role assignments"
 }
 
@@ -102,7 +101,8 @@ Each role is categorized as either an app-only role (the "Application
 <permission>" roles used by the RBAC for Applications model) or "Other".
 
 .PARAMETER Table
-The Azure Storage table where the role assignments are stored.
+The Azure Storage table (shared with the application access policies) where the
+role assignments are stored.
 #>
 function Save-RoleAssignments {
     param (
