@@ -80,6 +80,90 @@ function Start-Work () {
         }
     }
     Write-Output "Stored $($policiesCount) policies"
+
+    # Store EXO management role assignments granted to service principals
+    $roleTable = Get-StorageTable -AzureContext $azureContext -TableName "ApplicationRoleAssignments"
+    Clear-Table $roleTable
+    $roleAssignmentsCount = Save-RoleAssignments -Table $roleTable
+    Write-Output "Stored $($roleAssignmentsCount) role assignments"
+}
+
+<#
+.SYNOPSIS
+Stores the EXO management role assignments granted to service principals.
+
+.DESCRIPTION
+Enumerates the service principals registered in Exchange Online and, for each
+one, the management role assignments granted to it. Assignments can be granted
+directly to the service principal or indirectly through a role group; both are
+tracked and the RoleAssigneeType property distinguishes between them.
+
+Each role is categorized as either an app-only role (the "Application
+<permission>" roles used by the RBAC for Applications model) or "Other".
+
+.PARAMETER Table
+The Azure Storage table where the role assignments are stored.
+#>
+function Save-RoleAssignments {
+    param (
+        $Table
+    )
+    # Get-ServicePrincipal lists the service principals registered in EXO,
+    # which are the only ones that can hold management role assignments.
+    $servicePrincipals = Get-ServicePrincipal -ResultSize Unlimited
+    $stored = 0
+    foreach ($sp in $servicePrincipals) {
+        # Get-ManagementRoleAssignment -RoleAssignee returns both the
+        # assignments granted directly to the service principal and the ones
+        # granted indirectly through a role group the service principal belongs
+        # to. RoleAssigneeType tells direct (ServicePrincipal) from indirect
+        # (RoleGroup) assignments.
+        $assignments = Get-ManagementRoleAssignment -RoleAssignee $sp.Identity -ErrorAction SilentlyContinue
+        foreach ($assignment in $assignments) {
+            $isRoleGroup = $assignment.RoleAssigneeType -eq 'RoleGroup'
+            $pk = $sp.AppId
+            $rk = "RoleAssignment_$($assignment.Guid)"
+            $properties = @{
+                ApplicationId             = $sp.AppId
+                ServicePrincipalObjectId  = $sp.ObjectId
+                ServicePrincipalName      = $sp.DisplayName
+                AssignmentName            = $assignment.Name
+                Role                      = "$($assignment.Role)"
+                RoleCategory              = Get-RoleCategory -Role "$($assignment.Role)"
+                RoleAssigneeType          = "$($assignment.RoleAssigneeType)"
+                RoleAssigneeName          = $assignment.RoleAssigneeName
+                AssignmentMethod          = if ($isRoleGroup) { 'RoleGroup' } else { 'Direct' }
+                RoleGroup                 = if ($isRoleGroup) { $assignment.RoleAssigneeName } else { '' }
+                Enabled                   = $assignment.Enabled
+                RecipientWriteScope       = "$($assignment.RecipientWriteScope)"
+            }
+            Add-AzTableRow -Table $Table.CloudTable -PartitionKey $pk -RowKey $rk -Property $properties | Out-Null
+            $stored++
+        }
+    }
+    return $stored
+}
+
+<#
+.SYNOPSIS
+Categorizes an EXO management role as an app-only role or other.
+
+.DESCRIPTION
+The RBAC for Applications model in Exchange Online exposes app-only roles named
+"Application <Graph permission>" (for example "Application Mail.Read"). Any role
+matching that naming is categorized as "AppOnly"; every other role is "Other".
+
+.PARAMETER Role
+The name of the management role.
+#>
+function Get-RoleCategory {
+    param (
+        [string]$Role
+    )
+    if ($Role -like 'Application *') {
+        return 'AppOnly'
+    }
+    return 'Other'
 }
 
 function Get-StorageTable {
