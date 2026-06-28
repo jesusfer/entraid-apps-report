@@ -1,4 +1,16 @@
 #Requires -Module ExchangeOnlineManagement
+
+<#
+    PSScriptAnalyzer results (Invoke-ScriptAnalyzer -IncludeDefaultRules -Severity Error,Warning,Information)
+    All findings below are known and intentionally left as-is (none are treated as errors):
+
+    Severity    | Rule                                        | Notes
+    ------------|---------------------------------------------|----------------------------------------------------------
+    Warning     | PSReviewUnusedParameter                     | 'ManagedIdentityMethod' is consumed by Connect-ManagedIdentity.
+    Warning     | PSUseShouldProcessForStateChangingFunctions | 'Start-Work' is a runbook entry point, not a public cmdlet.
+    Warning     | PSUseSingularNouns                          | 'Save-RoleAssignments' matches the existing Save-* convention.
+    Information | PSAvoidTrailingWhitespace                   | Pre-existing trailing whitespace on a few lines.
+#>
 param
 (
     # UA or SA, User-Assigned or System Assigned
