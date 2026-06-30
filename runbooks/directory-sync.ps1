@@ -3,7 +3,10 @@ param
 (
     # UA or SA, User-Assigned or System Assigned
     [string]$ManagedIdentityMethod = "SA",
-    [int]$NotifyUsersResolveBatchSize = 15
+    [int]$NotifyUsersResolveBatchSize = 15,
+    # When enabled, re-resolve all grant principals from Graph instead of reusing
+    # the ones already stored, and clear the Principals table before saving.
+    [bool]$ForceUpdateAllUsers = $false
 )
 
 $TenantId = Get-AutomationVariable -Name 'TenantId'
@@ -102,24 +105,7 @@ function Start-Work {
     }
     Save-SPGrants @params
 
-    # Hashtable with key=principalId, value=principal
-    # Resolve the unique principals referenced in the grants
-    # One Graph request per unique principal
-    # Potentially the largest amount of requests
-    $grantsPrincipals = Get-SPGrantsPrincipals -Grants $servicePrincipalsGrants
-    Write-Output "Found $($grantsPrincipals.Count) Grant Principals"
-    Write-Warning "Mem checkpoint: $((Get-MemoryUsageMB).WorkingSetMB) MB"
-
     $principalsTable = Get-StorageTable -AzureContext $azureContext -TableName "Principals"
-    Clear-Table $principalsTable
-
-    # Store the unique principals referenced by the grants
-    Write-Output "Saving SPGrantsPrincipals"
-    $params = @{
-        GrantsPrincipals = $grantsPrincipals
-        PrincipalsTable  = $principalsTable
-    }
-    Save-SPGrantPrincipals @params
 
     # Store the notification users, searching for their details in Graph
     # Number of Graph requests is roughly the number of notification users / batchSize
@@ -130,6 +116,30 @@ function Start-Work {
         BatchSize       = $NotifyUsersResolveBatchSize
     }
     Save-SPNotificationUsers @params
+    # Hashtable with key=principalId, value=principal
+    # Resolve the unique principals referenced in the grants
+    # One Graph request per unique principal
+    # Potentially the largest amount of requests
+    $params = @{
+        Grants          = $servicePrincipalsGrants
+        PrincipalsTable = $principalsTable
+    }
+    $grantsPrincipals = Get-SPGrantPrincipals @params
+    Write-Output "Found $($grantsPrincipals.Count) new SP Grant Principals"
+    Write-Warning "Mem checkpoint: $((Get-MemoryUsageMB).WorkingSetMB) MB"
+
+    if ($ForceUpdateAllUsers) {
+        Clear-Table $principalsTable
+    }
+
+    # Store the unique principals referenced by the grants
+    Write-Output "Saving SPGrantsPrincipals"
+    $params = @{
+        GrantsPrincipals = $grantsPrincipals
+        PrincipalsTable  = $principalsTable
+    }
+    Save-SPGrantPrincipals @params
+
 }
 
 # Helper functions
@@ -491,12 +501,31 @@ function Save-SPNotificationUsers {
     }
 
     if ($uniqueNotifyUsers.Count -eq 0) {
-        Write-Output "No valid notify users to resolve"
+        Write-Warning "No valid notify users to resolve"
         return
     }
 
-    Write-Verbose "Resolving $($uniqueNotifyUsers.Count) notify users in batches of $BatchSize"
-    $resolvedUsers = Get-UsersWithEmailOrUPN -EmailOrUPNList $uniqueNotifyUsers.Keys -BatchSize $BatchSize
+    # Only resolve notify users that aren't already present in the Principals table.
+    # Notify users are stored under partition key "NotifyUsers" with the raw
+    # email/UPN as the row key.
+    $usersToResolve = @{}
+    foreach ($userKey in $uniqueNotifyUsers.Keys) {
+        $rawUser = $uniqueNotifyUsers[$userKey]
+        $existing = Get-AzTableRow -Table $pTable -PartitionKey "NotifyUsers" -RowKey $rawUser -ErrorAction SilentlyContinue
+        if ($existing) {
+            Write-Warning "Notify user $rawUser already exists in storage, skipping"
+            continue
+        }
+        $usersToResolve[$userKey] = $rawUser
+    }
+
+    if ($usersToResolve.Count -eq 0) {
+        Write-Warning "All notify users already exist in storage"
+        return
+    }
+
+    Write-Verbose "Resolving $($usersToResolve.Count) notify users in batches of $BatchSize"
+    $resolvedUsers = Get-UsersWithEmailOrUPN -EmailOrUPNList $usersToResolve.Keys -BatchSize $BatchSize
 
     $resolvedUsersByKey = @{}
     foreach ($userDetails in $resolvedUsers) {
@@ -508,8 +537,8 @@ function Save-SPNotificationUsers {
         }
     }
 
-    foreach ($userKey in $uniqueNotifyUsers.Keys) {
-        $rawUser = $uniqueNotifyUsers[$userKey]
+    foreach ($userKey in $usersToResolve.Keys) {
+        $rawUser = $usersToResolve[$userKey]
         if ($resolvedUsersByKey.ContainsKey($userKey)) {
             $userDetails = $resolvedUsersByKey[$userKey]
             Write-Verbose "Storing principal $($userDetails.userPrincipalName)"
@@ -900,22 +929,47 @@ function Get-SPOAuth2Grants {
     return $results
 }
 
-function Get-SPGrantsPrincipals {
-    param($Grants)
-    # Extract the unique, non-null principalIds referenced by the grants and
-    # resolve each one once into a hashtable keyed by principalId.
+function Get-SPGrantPrincipals {
+    param(
+        $Grants,
+        $PrincipalsTable
+    )
+    $pTable = $PrincipalsTable.CloudTable
+
+    # Extract the unique, non-null principalIds referenced by the grants.
+    # Unless ForceUpdateAllUsers is set, resolve a principal via Graph only when
+    # it isn't already present in the Principals storage table. Principals found
+    # in storage are recorded in an ignore list so the table isn't queried again
+    # for the same principalId.
     $principals = @{}
+    $ignoredPrincipals = @{}
     foreach ($servicePrincipalId in $Grants.Keys) {
         foreach ($grant in $Grants[$servicePrincipalId]) {
             $principalId = $grant.principalId
-            if ($principalId -and -not $principals.ContainsKey($principalId)) {
-                $userDetails = Get-UserDetails -UserId $principalId
-                $principalDict = @{}
-                foreach ($prop in $userDetails.PSObject.Properties) {
-                    $principalDict[$prop.Name] = $prop.Value
-                }
-                $principals[$principalId] = $principalDict
+            if (-not $principalId) {
+                continue
             }
+            # Already resolved or already known to exist in storage
+            if ($principals.ContainsKey($principalId) -or $ignoredPrincipals.ContainsKey($principalId)) {
+                Write-Warning "Principal $principalId already resolved or ignored, skipping"
+                continue
+            }
+            if (-not $ForceUpdateAllUsers) {
+                # Check the storage table once for this principal
+                $existing = Get-AzTableRow -Table $pTable -PartitionKey "Users" -RowKey $principalId -ErrorAction SilentlyContinue
+                if ($existing) {
+                    $ignoredPrincipals[$principalId] = $true
+                    Write-warning "Principal $principalId already exists in storage, skipping"
+                    continue
+                }
+            }
+            # Resolve from Graph
+            $userDetails = Get-UserDetails -UserId $principalId
+            $principalDict = @{}
+            foreach ($prop in $userDetails.PSObject.Properties) {
+                $principalDict[$prop.Name] = $prop.Value
+            }
+            $principals[$principalId] = $principalDict
         }
     }
     return $principals
