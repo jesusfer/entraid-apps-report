@@ -55,6 +55,16 @@ The deployment consists of several steps:
 
 Head over to the [install docs](https://github.com/jesusfer/entraid-apps-report/wiki/Installation-instructions) to get started.
 
+## Runtime Environments
+
+exo-policies.ps1 works with a PS 7.6 environment with:
+
+Module | Version
+-|-
+Az | 15.1.0
+AzTable | 2.1.0
+ExchangeOnlineManagement | 3.10.0
+
 ## More information
 
 More information available here:

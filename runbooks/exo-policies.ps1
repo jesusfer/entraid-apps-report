@@ -15,6 +15,8 @@ Import-Module ExchangeOnlineManagement
 Update-AzConfig -DisplaySecretsWarning $false | Out-Null
 $VerbosePreference = $PreviousVerbosePreference
 
+$ErrorActionPreference = 'Stop'
+
 $Subscription = Get-AutomationVariable -Name 'Subscription'
 $ResourceGroup = Get-AutomationVariable -Name 'ResourceGroup'
 $StorageAccountName = Get-AutomationVariable -Name 'StorageAccountName'
@@ -33,9 +35,7 @@ function Start-Work () {
         Organization          = $Organization
     }
     Connect-ExchangeOnline @params
-    Write-Verbose "EXO connected"
-
-    $ErrorActionPreference = 'Stop'
+    Write-Output "EXO connected"
 
     # Store data in Azure Storage Account
     $azureContext = Connect-ManagedIdentity
@@ -44,6 +44,26 @@ function Start-Work () {
     $table = Get-StorageTable -AzureContext $azureContext -TableName "ApplicationPolicies"
     Clear-Table $table
 
+    # Store EXO application access policies
+    Save-ApplicationAccessPolicy -Table $table
+
+    # Store EXO management role assignments granted to service principals
+    Save-RoleAssignments -Table $table
+}
+
+<#
+.SYNOPSIS
+Stores the EXO application access policies.
+
+.DESCRIPTION
+Enumerates the application access policies configured in Exchange Online and
+stores each one in the shared Azure Storage table, keyed by the AppId and the
+scope name.
+#>
+function Save-ApplicationAccessPolicy {
+    param (
+        $Table
+    )
     <#
         Get-ManagementRole -Cmdlet Get-ApplicationAccessPolicy
 
@@ -57,34 +77,44 @@ function Start-Work () {
     $policies = Get-ApplicationAccessPolicy
     foreach ($policy in $policies) {
         $groupId = $policy.ScopeIdentityRaw.split(";")[1]
-        $pk = $policy.AppId
-        $rk = "AppAccessPolicy_$($policy.Guid)"
+        $pk = "AppAccessPolicy"
+        # $rk = $policy.Identity.Replace("\", "_").Replace(";", "_").Replace(":", "_")
+        $rk = "$($policy.AppId)_$($policy.ScopeName)"
         $properties = @{
             ApplicationId = $policy.AppId
             Name          = $policy.ScopeName
-            Identity      = $policy.ScopeIdentity
+            Identity      = $policy.Identity
+            ScopeIdentity = $policy.ScopeIdentity
             Description   = $policy.Description
             GroupId       = $groupId
             AccessRight   = $policy.AccessRight
             ShardType     = $policy.ShardType
             IsValid       = $policy.IsValid
         }
-        Add-AzTableRow -Table $table.CloudTable -PartitionKey $pk -RowKey $rk -Property $properties | Out-Null
+        try {
+            Add-AzTableRow -Table $Table.CloudTable -PartitionKey $pk -RowKey $rk -Property $properties | Out-Null
+        }
+        catch {
+            $messages = @()
+            $ex = $_.Exception
+            while ($null -ne $ex) {
+                $messages += $ex.Message
+                $ex = $ex.InnerException
+            }
+            Write-Error "Failed to add row with PartitionKey '$PartitionKey' and RowKey '$RowKey': $([String]::Join(' --> ', $messages))" -ErrorAction Continue
+            Write-Error $properties
+        }
     }
     $policiesCount = 0
     if ($null -ne $policies) {
         if ($null -ne $policies.Count) {
             $policiesCount = $policies.Count
-        } else {
+        }
+        else {
             $policiesCount = 1
         }
     }
-    Write-Output "Stored $($policiesCount) policies"
-
-    # Store EXO management role assignments granted to service principals
-    # in the same table as the policies, keyed by the AppId.
-    $roleAssignmentsCount = Save-RoleAssignments -Table $table
-    Write-Output "Stored $($roleAssignmentsCount) role assignments"
+    Write-Output "Stored $($policiesCount) application access policies"
 }
 
 <#
@@ -99,10 +129,6 @@ tracked and the RoleAssigneeType property distinguishes between them.
 
 Each role is categorized as either an app-only role (the "Application
 <permission>" roles used by the RBAC for Applications model) or "Other".
-
-.PARAMETER Table
-The Azure Storage table (shared with the application access policies) where the
-role assignments are stored.
 #>
 function Save-RoleAssignments {
     param (
@@ -110,7 +136,8 @@ function Save-RoleAssignments {
     )
     # Get-ServicePrincipal lists the service principals registered in EXO,
     # which are the only ones that can hold management role assignments.
-    $servicePrincipals = Get-ServicePrincipal -ResultSize Unlimited
+    $servicePrincipals = Get-ServicePrincipal
+    Write-Output "Got $($servicePrincipals.Count) EXO SP"
     $stored = 0
     foreach ($sp in $servicePrincipals) {
         # Get-ManagementRoleAssignment -RoleAssignee returns both the
@@ -121,27 +148,30 @@ function Save-RoleAssignments {
         $assignments = Get-ManagementRoleAssignment -RoleAssignee $sp.Identity -ErrorAction SilentlyContinue
         foreach ($assignment in $assignments) {
             $isRoleGroup = $assignment.RoleAssigneeType -eq 'RoleGroup'
-            $pk = $sp.AppId
-            $rk = "RoleAssignment_$($assignment.Guid)"
+            $pk = "RoleAssignment"
+            $rk = "$($sp.ObjectId)_$($assignment.Guid)"
+            Write-output  $rk
             $properties = @{
-                ApplicationId             = $sp.AppId
                 ServicePrincipalObjectId  = $sp.ObjectId
-                ServicePrincipalName      = $sp.DisplayName
+                Enabled                   = $assignment.Enabled
                 AssignmentName            = $assignment.Name
                 Role                      = "$($assignment.Role)"
                 RoleCategory              = Get-RoleCategory -Role "$($assignment.Role)"
-                RoleAssigneeType          = "$($assignment.RoleAssigneeType)"
-                RoleAssigneeName          = $assignment.RoleAssigneeName
-                AssignmentMethod          = if ($isRoleGroup) { 'RoleGroup' } else { 'Direct' }
+                AssignmentMethod          = "$($assignment.AssignmentMethod)"
                 RoleGroup                 = if ($isRoleGroup) { $assignment.RoleAssigneeName } else { '' }
-                Enabled                   = $assignment.Enabled
+                RecipientReadScope        = "$($assignment.RecipientReadScope)"
                 RecipientWriteScope       = "$($assignment.RecipientWriteScope)"
+                ConfigReadScope           = "$($assignment.ConfigReadScope)"
+                ConfigWriteScope          = "$($assignment.ConfigWriteScope)"
+                CustomRecipientWriteScope = "$($assignment.CustomRecipientWriteScope)"
+                CustomResourceScope       = "$($assignment.CustomResourceScope)"
+                CustomConfigWriteScope    = "$($assignment.CustomConfigWriteScope)"
             }
             Add-AzTableRow -Table $Table.CloudTable -PartitionKey $pk -RowKey $rk -Property $properties | Out-Null
             $stored++
         }
     }
-    return $stored
+    Write-Output "Stored $stored SP role assignments"
 }
 
 <#
@@ -207,7 +237,8 @@ function Connect-ManagedIdentity {
                 $azureContext = Set-AzContext -SubscriptionName $Subscription -DefaultProfile $azureContext
                 Write-Verbose "Logged in with managed identity"
                 return $azureContext
-            } catch {
+            }
+            catch {
                 Write-Error "Error using system-assigned identity: $($_)"
                 exit
             }
@@ -220,7 +251,8 @@ function Connect-ManagedIdentity {
                 $azureContext = Set-AzContext -SubscriptionName $Subscription -DefaultProfile $azureContext
                 Write-Verbose "Logged in with user assigned identity"
                 return $azureContext
-            } catch {
+            }
+            catch {
                 Write-Error "Error using user assigned identity: $($_)"
                 exit
             }
