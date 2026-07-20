@@ -79,7 +79,7 @@ function Save-ApplicationAccessPolicy {
         $groupId = $policy.ScopeIdentityRaw.split(";")[1]
         $pk = "AppAccessPolicy"
         # $rk = $policy.Identity.Replace("\", "_").Replace(";", "_").Replace(":", "_")
-        $rk = "$($policy.AppId)_$($policy.ScopeName)"
+        $rk = "$($policy.AppId)_$($policy.ScopeName)".Replace("\", "_").Replace("/", "_").Replace(";", "_").Replace(":", "_")
         $properties = @{
             ApplicationId = $policy.AppId
             Name          = $policy.ScopeName
@@ -101,7 +101,7 @@ function Save-ApplicationAccessPolicy {
                 $messages += $ex.Message
                 $ex = $ex.InnerException
             }
-            Write-Error "Failed to add row with PartitionKey '$PartitionKey' and RowKey '$RowKey': $([String]::Join(' --> ', $messages))" -ErrorAction Continue
+            Write-Error "Failed to add row with PartitionKey '$pk' and RowKey '$rk': $([String]::Join(' --> ', $messages))" -ErrorAction Continue
             Write-Error $properties
         }
     }
