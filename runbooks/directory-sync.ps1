@@ -3,7 +3,7 @@ param
 (
     # UA or SA, User-Assigned or System Assigned
     [string]$ManagedIdentityMethod = "SA",
-    [int]$NotifyUsersResolveBatchSize = 15,
+    [int]$NotifyUsersResolveBatchSize = 7,
     # When enabled, re-resolve all grant principals from Graph instead of reusing
     # the ones already stored, and clear the Principals table before saving.
     [bool]$ForceUpdateAllUsers = $false
@@ -476,7 +476,7 @@ function Save-SPNotificationUsers {
     param(
         $NotifyUsers,
         $PrincipalsTable,
-        [int]$BatchSize = 15
+        [int]$BatchSize = 7
     )
 
     if (-not $NotifyUsers -or $NotifyUsers.Count -eq 0) {
