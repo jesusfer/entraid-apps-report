@@ -185,6 +185,7 @@ function Add-TableRow {
             $ex = $ex.InnerException
         }
         Write-Error "Failed to add row with PartitionKey '$PartitionKey' and RowKey '$RowKey': $([String]::Join(' --> ', $messages))"
+        # Write-Error "Property: $($Property | ConvertTo-Json -Depth 5)"
     }
 }
 
@@ -456,9 +457,9 @@ function Save-SPAppRoleAssignments {
                 AssignmentId        = $assignment.id
                 AppRoleId           = $assignment.appRoleId
                 CreatedDateTime     = IfNull $assignment.createdDateTime
-                ResourceDisplayName = $assignment.resourceDisplayName
+                ResourceDisplayName = IfNull $assignment.resourceDisplayName
                 # Object Id of the service principal that exposes the role
-                ResourceId          = $assignment.resourceId
+                ResourceId          = IfNull $assignment.resourceId
             }
             $params = @{
                 Table        = $table
